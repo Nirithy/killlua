@@ -97,6 +97,67 @@
             cursor: pointer;
         }
 
+        .processing-list {
+            margin-top: 20px;
+            background: var(--panel-bg);
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            padding: 10px;
+            max-height: 250px;
+            overflow-y: auto;
+            flex-grow: 1;
+            margin-bottom: 10px;
+        }
+
+        .processing-list h3 {
+            margin-top: 0;
+            font-size: 1rem;
+            color: var(--text-bright);
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 5px;
+            margin-bottom: 10px;
+        }
+
+        .process-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 5px 0;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.85rem;
+        }
+
+        .process-item:last-child {
+            border-bottom: none;
+        }
+
+        .process-item .name {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-right: 10px;
+            flex-grow: 1;
+        }
+
+        .process-item .actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .btn-mini {
+            padding: 2px 6px;
+            font-size: 0.75rem;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+        }
+
+        .btn-mini:hover {
+            background: var(--accent-hover);
+        }
+
         button#processBtn {
             width: 100%;
             padding: 12px;
@@ -115,7 +176,6 @@
         }
 
         #status {
-            margin-top: auto;
             padding: 10px;
             border-radius: 4px;
             font-size: 0.9rem;
@@ -252,6 +312,13 @@
 
         <button id="processBtn">开始处理字节码</button>
 
+        <div class="processing-list">
+            <h3>处理列表</h3>
+            <div id="processItems">
+                <!-- Items added here -->
+            </div>
+        </div>
+
         <div id="status">等待 WASM 加载...</div>
     </div>
 
@@ -259,6 +326,7 @@
         <div class="tabs">
             <div class="tab active" data-tab="disasm">反汇编输出</div>
             <div class="tab" data-tab="cfg">控制流图 (CFG)</div>
+            <div class="tab" data-tab="asm">汇编处理</div>
             <div class="tab" data-tab="info">文件详情</div>
         </div>
 
@@ -270,6 +338,19 @@
             <div id="cfg-container">
                 <p style="color: #333">尚未生成控制流图</p>
             </div>
+        </div>
+
+        <div id="asm" class="tab-content">
+            <div class="control-group">
+                <label>汇编 .lasm 内容</label>
+                <textarea id="asmInput" style="width: 100%; height: 300px; background: var(--code-bg); color: #d4d4d4; border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; font-family: monospace;" placeholder="粘贴 .lasm 内容或点击下方上传"></textarea>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <input type="file" id="asmFileInput" accept=".lasm,.txt" style="display: none;">
+                <button class="btn-mini" onclick="document.getElementById('asmFileInput').click()" style="padding: 10px 20px;">上传 .lasm 文件</button>
+                <button id="assembleBtn" style="padding: 10px 20px; background: var(--accent-color); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">开始汇编</button>
+            </div>
+            <div id="asmStatus" style="margin-top: 10px; font-size: 0.9rem;"></div>
         </div>
 
         <div id="info" class="tab-content">
@@ -329,6 +410,74 @@
             }
         }
 
+        function addProcessItem(name, data, type) {
+            const container = document.getElementById('processItems');
+            const item = document.createElement('div');
+            item.className = 'process-item';
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'name';
+            nameEl.innerText = name;
+            nameEl.title = name;
+
+            const actions = document.createElement('div');
+            actions.className = 'actions';
+
+            const dlBtn = document.createElement('button');
+            dlBtn.className = 'btn-mini';
+            dlBtn.innerText = '下载';
+            dlBtn.onclick = () => {
+                const blob = type === 'luac' ? new Blob([data], {type: 'application/octet-stream'}) : new Blob([data], {type: 'text/plain'});
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = name;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+
+            actions.appendChild(dlBtn);
+            item.appendChild(nameEl);
+            item.appendChild(actions);
+            container.prepend(item);
+        }
+
+        document.getElementById('asmFileInput').onchange = (e) => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = (re) => {
+                document.getElementById('asmInput').value = re.target.result;
+            };
+            reader.readAsText(file);
+        };
+
+        document.getElementById('assembleBtn').onclick = async () => {
+            const content = document.getElementById('asmInput').value;
+            if (!content) {
+                alert('请先输入或上传 .lasm 内容');
+                return;
+            }
+
+            try {
+                document.getElementById('asmStatus').innerText = '正在汇编...';
+                document.getElementById('asmStatus').style.color = '#cccccc';
+                const result = LuaDeob.assemble(content);
+                if (result.success) {
+                    document.getElementById('asmStatus').innerText = '汇编成功';
+                    document.getElementById('asmStatus').style.color = '#4caf50';
+                    addProcessItem("assembled_" + Date.now() + ".luac", result.bytecode, 'luac');
+                } else {
+                    document.getElementById('asmStatus').innerText = '汇编失败: ' + result.error;
+                    document.getElementById('asmStatus').style.color = '#f44336';
+                }
+            } catch (err) {
+                document.getElementById('asmStatus').innerText = '运行错误: ' + err.message;
+                document.getElementById('asmStatus').style.color = '#f44336';
+            }
+        };
+
         document.getElementById('processBtn').onclick = async () => {
             const fileInput = document.getElementById('fileInput');
             if (fileInput.files.length === 0) {
@@ -370,6 +519,11 @@
                         renderCFG(result.dot);
                         document.getElementById('status').innerText = '处理完成';
                         document.getElementById('status').style.color = '#4caf50';
+
+                        // Add to processing list
+                        const baseName = file.name.replace(/\.[^/.]+$/, "");
+                        addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');
+                        addProcessItem(baseName + "_deob.lasm", result.disassembly, 'lasm');
                     } else {
                         document.getElementById('disassemblyOutput').innerText = '错误: ' + result.error;
                         document.getElementById('status').innerText = '处理失败';
@@ -387,10 +541,13 @@
         async function renderCFG(dot) {
             try {
                 const hpccWasm = window["@hpcc-js/wasm"];
-                const svg = await hpccWasm.graphviz.layout(dot, "svg", "dot");
+                // New API for @hpcc-js/wasm
+                const graphviz = await hpccWasm.Graphviz.load();
+                const svg = graphviz.dot(dot);
                 document.getElementById('cfg-container').innerHTML = svg;
             } catch (e) {
-                document.getElementById('cfg-container').innerHTML = `<p style="color: red; padding: 20px;">CFG 渲染错误: ${e}</p>`;
+                console.error(e);
+                document.getElementById('cfg-container').innerHTML = `<p style="color: red; padding: 20px;">CFG 渲染错误: ${e.message || e}</p>`;
             }
         }
 
