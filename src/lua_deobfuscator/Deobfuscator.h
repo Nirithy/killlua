@@ -17,9 +17,23 @@ struct DeobfuscationResult {
 
 class Deobfuscator {
 public:
+    struct RegValue {
+        enum { UNKNOWN, CONSTANT, MULTIPLE } state = UNKNOWN;
+        LuaConstant val;
+
+        bool operator==(const RegValue& other) const {
+            if (state != other.state) return false;
+            if (state != CONSTANT) return true;
+            if (val.type != other.val.type) return false;
+            return val.value == other.val.value;
+        }
+        bool operator!=(const RegValue& other) const { return !(*this == other); }
+    };
+
     Deobfuscator(std::shared_ptr<Prototype> proto);
 
     DeobfuscationResult run_constant_folding();
+    DeobfuscationResult run_constant_propagation();
     DeobfuscationResult run_dead_code_elimination();
     DeobfuscationResult run_dead_branch_elimination();
     DeobfuscationResult run_sequential_block_merging();
@@ -30,6 +44,10 @@ private:
     std::shared_ptr<Prototype> proto;
     std::unique_ptr<CFG> cfg;
 
+    std::map<int, std::vector<RegValue>> block_entry_regs;
+    std::map<int, std::vector<RegValue>> block_exit_regs;
+
+    void perform_constant_propagation();
     void rebuild_from_cfg();
     int simplify_jmp_chains();
     int find_jmp_chain_target(int block_id, std::set<int>& visited);
