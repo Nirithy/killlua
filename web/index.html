@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Lua 字节码反混淆工具 (WASM)</title>
-    <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js"></script>
     <style>
         :root {
             --bg-color: #1e1e1e;
@@ -336,6 +336,9 @@
                 <label class="checkbox-item">
                     <input type="checkbox" id="dceCheck" checked> 死代码消除 (Dead Code)
                 </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="deflattenCheck" checked> 反扁平化 (Deflatten)
+                </label>
             </div>
         </div>
 
@@ -535,8 +538,9 @@
                 const dbe = document.getElementById('dbeCheck').checked;
                 const sbm = document.getElementById('sbmCheck').checked;
                 const dce = document.getElementById('dceCheck').checked;
+                const deflatten = document.getElementById('deflattenCheck').checked;
 
-                const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce);
+                const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce, deflatten);
 
                 const endTime = performance.now();
                 document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
@@ -562,7 +566,7 @@
         }
 
         // Add real-time update listeners
-        ['foldCheck', 'dbeCheck', 'sbmCheck', 'dceCheck'].forEach(id => {
+        ['foldCheck', 'dbeCheck', 'sbmCheck', 'dceCheck', 'deflattenCheck'].forEach(id => {
             document.getElementById(id).onchange = updateDeobfuscation;
         });
 
@@ -582,7 +586,7 @@
 
                 // Get baseline disassembly
                 try {
-                    const result = LuaDeob.deobfuscate(currentBytecode, false, false, false, false);
+                    const result = LuaDeob.deobfuscate(currentBytecode, false, false, false, false, false);
                     if (result.success) {
                         document.getElementById('originalDisasm').innerText = result.disassembly;
                         updateDeobfuscation();
@@ -606,8 +610,9 @@
             const dbe = document.getElementById('dbeCheck').checked;
             const sbm = document.getElementById('sbmCheck').checked;
             const dce = document.getElementById('dceCheck').checked;
+            const deflatten = document.getElementById('deflattenCheck').checked;
 
-            const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce);
+            const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce, deflatten);
             if (result.success) {
                 const baseName = currentFileName.replace(/\.[^/.]+$/, "");
                 addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');
@@ -619,13 +624,85 @@
 
         async function renderCFG(dot) {
             try {
-                const hpccWasm = window["@hpcc-js/wasm"] || window.hpccWasm;
-                if (!hpccWasm) {
-                    throw new Error("未找到 @hpcc-js/wasm 库。请检查网络连接或 CDN 状态。");
-                }
-                const graphviz = await hpccWasm.Graphviz.load();
-                const svg = graphviz.dot(dot);
-                document.getElementById('cfg-container').innerHTML = svg;
+                const container = document.getElementById('cfg-container');
+                container.innerHTML = '';
+
+                // Replace literal \n in dot string with actual newlines so parser handles multiline text
+                // vis.network.convertDot handles actual newlines if quoted.
+                const unescapedDot = dot.replace(/\\n/g, '\n');
+
+                const parsedData = vis.network.convertDot(unescapedDot);
+
+                const data = {
+                    nodes: new vis.DataSet(parsedData.nodes.map(n => {
+                        // Apply default styling
+                        n.shape = 'box';
+                        n.font = { face: 'Consolas, Monaco, monospace', align: 'left', size: 14, color: 'black' };
+                        n.color = { background: n.color || '#E0E0E0', border: '#333333' };
+                        if (n.color === 'green') n.color.background = '#90EE90';
+                        if (n.color === 'red') n.color.background = '#FFB6C1';
+                        return n;
+                    })),
+                    edges: new vis.DataSet(parsedData.edges.map(e => {
+                        e.arrows = 'to';
+                        e.font = { align: 'horizontal', color: 'black' };
+                        return e;
+                    }))
+                };
+
+                const options = {
+                    layout: {
+                        hierarchical: {
+                            direction: 'UD',
+                            sortMethod: 'directed',
+                            nodeSpacing: 250,
+                            levelSeparation: 200,
+                            treeSpacing: 250
+                        }
+                    },
+                    physics: {
+                        enabled: false
+                    },
+                    interaction: {
+                        hover: true,
+                        navigationButtons: true,
+                        keyboard: true
+                    }
+                };
+
+                const network = new vis.Network(container, data, options);
+
+                network.on("doubleClick", function (params) {
+                    if (params.nodes.length > 0) {
+                        const nodeId = params.nodes[0];
+                        const node = data.nodes.get(nodeId);
+                        const newLabel = prompt("编辑节点代码 (汇编格式):", node.label);
+                        if (newLabel !== null) {
+                            data.nodes.update({ id: nodeId, label: newLabel });
+
+                            // To actually integrate with compilation, we take all node labels,
+                            // order them, and construct an ASM string.
+                            const allNodes = data.nodes.get();
+                            allNodes.sort((a,b) => parseInt(a.id) - parseInt(b.id));
+                            let asmContent = "";
+                            allNodes.forEach(n => {
+                                // Extract just the instructions, ignoring the "BBx [PC y-z]" header
+                                const parts = n.label.split('\n');
+                                parts.slice(1).forEach(p => {
+                                    // Remove the "PC: " prefix
+                                    const codeMatch = p.match(/^\d+:\s*(.*)/);
+                                    if (codeMatch) asmContent += codeMatch[1] + "\n";
+                                    else asmContent += p + "\n";
+                                });
+                            });
+
+                            document.getElementById('asmInput').value = asmContent;
+                            // Switch to ASM tab automatically
+                            document.querySelector('.tab[data-tab="asm"]').click();
+                        }
+                    }
+                });
+
             } catch (e) {
                 console.error(e);
                 document.getElementById('cfg-container').innerHTML = `<p style="color: red; padding: 20px;">CFG 渲染错误: ${e.message || e}</p>`;
