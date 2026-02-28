@@ -13,6 +13,23 @@
 
 using namespace lua_deobfuscator;
 
+void process_prototype(std::shared_ptr<Prototype> proto, bool fold, bool dbe, bool sbm, bool dce, bool deflatten) {
+    Deobfuscator deob(proto);
+    for (int i = 0; i < 10; ++i) {
+        int changes = 0;
+        if (fold) changes += deob.run_constant_folding().changes_made;
+        if (dbe) changes += deob.run_dead_branch_elimination().changes_made;
+        if (sbm) changes += deob.run_sequential_block_merging().changes_made;
+        if (dce) changes += deob.run_dead_code_elimination().changes_made;
+        if (deflatten) changes += deob.run_control_flow_deflattening().changes_made;
+        if (fold || dbe || deflatten) deob.run_constant_propagation();
+        if (changes == 0 && i > 0) break;
+    }
+    for (auto child : proto->protos) {
+        process_prototype(child, fold, dbe, sbm, dce, deflatten);
+    }
+}
+
 void print_help() {
     std::cout << "Usage: lua_deobfuscator_cpp <input> [options]" << std::endl;
     std::cout << "Options:" << std::endl;
@@ -74,8 +91,7 @@ int main(int argc, char** argv) {
         LuaChunk chunk = Parser::parse(data);
 
         if (do_deobfuscate) {
-            Deobfuscator deob(chunk.main);
-            deob.run_all_passes(10);
+            process_prototype(chunk.main, true, true, true, true, true);
         }
 
         if (do_disassemble) {
@@ -119,21 +135,8 @@ DeobResultJS deobfuscate_wasm(emscripten::val input, bool fold, bool dbe, bool s
         LuaChunk chunk = Parser::parse(data);
         Deobfuscator deob(chunk.main);
 
-        // Run optimizations in a loop if any are selected, to ensure interdependent passes settle
         if (fold || dbe || sbm || dce || deflatten) {
-            for (int i = 0; i < 10; ++i) {
-                int changes = 0;
-                if (fold) changes += deob.run_constant_folding().changes_made;
-                if (dbe) changes += deob.run_dead_branch_elimination().changes_made;
-                if (sbm) changes += deob.run_sequential_block_merging().changes_made;
-                if (dce) changes += deob.run_dead_code_elimination().changes_made;
-                if (deflatten) changes += deob.run_control_flow_deflattening().changes_made;
-
-                // Constant propagation doesn't return changes_made but is needed for DBE
-                if (fold || dbe || deflatten) deob.run_constant_propagation();
-
-                if (changes == 0 && i > 0) break;
-            }
+            process_prototype(chunk.main, fold, dbe, sbm, dce, deflatten);
         }
 
         Disassembler disasm(chunk);

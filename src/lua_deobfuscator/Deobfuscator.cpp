@@ -447,21 +447,135 @@ DeobfuscationResult Deobfuscator::run_sequential_block_merging() {
 }
 
 DeobfuscationResult Deobfuscator::run_control_flow_deflattening() {
-    // Basic deflattening: if block assigns a constant to a dispatcher register and jumps to a dispatcher block,
-    // we rewrite the block to bypass the dispatcher loop and jump directly to the target block.
-    // However, our dead_branch_elimination + sequential_block_merging already resolves this efficiently
-    // if constant propagation tracks the state register. We'll implement a more explicit deflattening later if needed,
-    // but running dead_branch_elimination iteratively accomplishes control flow deflattening for state machines.
-    // For now, let's keep it as an explicit pass that triggers the iterative simplification.
+    perform_constant_propagation();
     int changes = 0;
 
-    // As `perform_constant_propagation` is called inside `run_dead_branch_elimination`,
-    // it automatically handles resolving branch directions if state variables are constant.
-    // The "flattened" control flow is effectively eliminated by doing:
-    // constant_propagation -> dead_branch_elimination -> dead_code_elimination -> block_merging
-    // in a loop.
+    bool changed = true;
+    while (changed) {
+        changed = false;
 
-    return {true, "Control Flow Deflattening", changes, "Control flow deflattening is implicitly handled by iterative dead branch elimination."};
+        for (auto const& [id, block] : cfg->blocks) {
+            if (block->successors.size() != 1) continue;
+            if (block->instructions.empty()) continue;
+
+            Opcode last_op = static_cast<Opcode>(block->instructions.back().opcode);
+            int next_id = *block->successors.begin();
+
+            auto exit_regs = block_exit_regs[id];
+            int current_id = next_id;
+            std::set<int> visited;
+            bool valid_trace = true;
+
+            while (true) {
+                if (visited.count(current_id)) { valid_trace = false; break; }
+                visited.insert(current_id);
+                auto current_block = cfg->blocks[current_id];
+
+                if (current_block->instructions.empty()) break;
+
+                auto& instr = current_block->instructions.back();
+                Opcode op = static_cast<Opcode>(instr.opcode);
+
+                // Allow only JMP or conditional checks as dispatcher blocks
+                if (current_block->instructions.size() > 1) {
+                    break;
+                }
+
+                if (op == Opcode::JMP) {
+                    if (current_block->successors.size() == 1) {
+                        current_id = *current_block->successors.begin();
+                        continue;
+                    } else break;
+                }
+
+                std::set<Opcode> conditional_ops = {Opcode::EQ, Opcode::LT, Opcode::LE, Opcode::NEQ, Opcode::GE, Opcode::GT, Opcode::TEST, Opcode::TESTSET};
+                if (conditional_ops.count(op) && current_block->successors.size() == 2) {
+                    bool known_outcome = false;
+                    bool result = false;
+
+                    auto get_val = [&](int reg_or_k) -> std::pair<bool, LuaConstant> {
+                        if (ISK(reg_or_k)) {
+                            int idx = INDEXK(reg_or_k);
+                            if (idx >= 0 && idx < (int)proto->constants.size()) return {true, proto->constants[idx]};
+                        } else {
+                            if (reg_or_k >= 0 && reg_or_k < 256 && exit_regs[reg_or_k].state == RegValue::CONSTANT) return {true, exit_regs[reg_or_k].val};
+                        }
+                        return {false, {}};
+                    };
+
+                    if (op == Opcode::EQ || op == Opcode::LT || op == Opcode::LE || op == Opcode::NEQ || op == Opcode::GE || op == Opcode::GT) {
+                        auto [bk, vb] = get_val(instr.b);
+                        auto [ck, vc] = get_val(instr.c);
+                        if (bk && ck && vb.type == vc.type) {
+                            known_outcome = true;
+                            if (vb.type == LuaConstantType::NUMBER) result = (std::get<double>(vb.value) == std::get<double>(vc.value));
+                            else if (vb.type == LuaConstantType::INT) result = (std::get<int64_t>(vb.value) == std::get<int64_t>(vc.value));
+                            else if (vb.type == LuaConstantType::BOOLEAN) result = (std::get<bool>(vb.value) == std::get<bool>(vc.value));
+                            else if (vb.type == LuaConstantType::STRING) result = (std::get<std::string>(vb.value) == std::get<std::string>(vc.value));
+                            else if (vb.type == LuaConstantType::NIL) result = true;
+
+                            if (op == Opcode::EQ) {
+                            } else if (op == Opcode::NEQ) {
+                                result = !result;
+                            } else if (op == Opcode::LT || op == Opcode::LE || op == Opcode::GE || op == Opcode::GT) {
+                                double db = (vb.type == LuaConstantType::INT) ? (double)std::get<int64_t>(vb.value) : std::get<double>(vb.value);
+                                double dc = (vc.type == LuaConstantType::INT) ? (double)std::get<int64_t>(vc.value) : std::get<double>(vc.value);
+                                if (op == Opcode::LT) result = (db < dc);
+                                else if (op == Opcode::LE) result = (db <= dc);
+                                else if (op == Opcode::GE) result = (db >= dc);
+                                else if (op == Opcode::GT) result = (db > dc);
+                            }
+                            result = (result != (instr.a != 0));
+                        }
+                    } else if (op == Opcode::TEST || op == Opcode::TESTSET) {
+                        auto [ak, va] = get_val(op == Opcode::TEST ? instr.a : instr.b);
+                        if (ak) {
+                            known_outcome = true;
+                            bool cond = (va.type != LuaConstantType::NIL && (va.type != LuaConstantType::BOOLEAN || std::get<bool>(va.value)));
+                            result = (cond == (instr.c != 0));
+                        }
+                    }
+
+                    if (known_outcome) {
+                        int next_target = -1;
+                        for (int s : current_block->successors) {
+                            if (cfg->edges[{current_id, s}] == (result ? EdgeType::COND_TRUE : EdgeType::COND_FALSE)) {
+                                next_target = s;
+                                break;
+                            }
+                        }
+                        if (next_target != -1) {
+                            current_id = next_target;
+                            continue;
+                        }
+                    }
+                }
+
+                break;
+            }
+
+            if (valid_trace && current_id != next_id && current_id != id) {
+                cfg->edges.erase({id, next_id});
+                cfg->blocks[id]->successors.erase(next_id);
+                cfg->blocks[next_id]->predecessors.erase(id);
+
+                cfg->blocks[id]->successors.insert(current_id);
+                cfg->blocks[current_id]->predecessors.insert(id);
+                cfg->edges[{id, current_id}] = EdgeType::JUMP;
+
+                if (last_op != Opcode::JMP) {
+                    block->instructions.push_back(Instruction::encode_new(static_cast<int>(Opcode::JMP), 0, 0, 0, 0, 0));
+                }
+
+                changes++;
+                changed = true;
+                break;
+            }
+        }
+    }
+
+    if (changes > 0) rebuild_from_cfg();
+    return {true, "Control Flow Deflattening", changes, "Deflattened " + std::to_string(changes) + " branches."};
 }
 
 std::vector<DeobfuscationResult> Deobfuscator::run_all_passes(int max_iterations) {
