@@ -37,6 +37,7 @@ public:
     DeobfuscationResult run_dead_code_elimination();
     DeobfuscationResult run_dead_branch_elimination();
     DeobfuscationResult run_sequential_block_merging();
+    DeobfuscationResult run_control_flow_deflattening();
 
     std::vector<DeobfuscationResult> run_all_passes(int max_iterations = 10);
 

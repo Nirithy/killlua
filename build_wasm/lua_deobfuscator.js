@@ -4987,6 +4987,15 @@ ${functionBody}
     };
 
 
+
+  var __emval_get_global = (name) => {
+      if (!name) {
+        return Emval.toHandle(globalThis);
+      }
+      name = getStringOrSymbol(name);
+      return Emval.toHandle(globalThis[name]);
+    };
+
   var __emval_get_property = (handle, key) => {
       handle = Emval.toValue(handle);
       key = Emval.toValue(key);
@@ -5945,6 +5954,8 @@ var wasmImports = {
   _emval_create_invoker: __emval_create_invoker,
   /** @export */
   _emval_decref: __emval_decref,
+  /** @export */
+  _emval_get_global: __emval_get_global,
   /** @export */
   _emval_get_property: __emval_get_property,
   /** @export */

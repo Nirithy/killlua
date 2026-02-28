@@ -75,10 +75,7 @@ int main(int argc, char** argv) {
 
         if (do_deobfuscate) {
             Deobfuscator deob(chunk.main);
-            deob.run_constant_folding();
-            deob.run_dead_branch_elimination();
-            deob.run_sequential_block_merging();
-            deob.run_dead_code_elimination();
+            deob.run_all_passes(10);
         }
 
         if (do_disassemble) {
@@ -113,7 +110,7 @@ struct DeobResultJS {
     std::string error;
 };
 
-DeobResultJS deobfuscate_wasm(emscripten::val input, bool fold, bool dbe, bool sbm, bool dce) {
+DeobResultJS deobfuscate_wasm(emscripten::val input, bool fold, bool dbe, bool sbm, bool dce, bool deflatten) {
     try {
         auto l = input["length"].as<unsigned>();
         std::vector<uint8_t> data(l);
@@ -123,16 +120,17 @@ DeobResultJS deobfuscate_wasm(emscripten::val input, bool fold, bool dbe, bool s
         Deobfuscator deob(chunk.main);
 
         // Run optimizations in a loop if any are selected, to ensure interdependent passes settle
-        if (fold || dbe || sbm || dce) {
+        if (fold || dbe || sbm || dce || deflatten) {
             for (int i = 0; i < 10; ++i) {
                 int changes = 0;
                 if (fold) changes += deob.run_constant_folding().changes_made;
                 if (dbe) changes += deob.run_dead_branch_elimination().changes_made;
                 if (sbm) changes += deob.run_sequential_block_merging().changes_made;
                 if (dce) changes += deob.run_dead_code_elimination().changes_made;
+                if (deflatten) changes += deob.run_control_flow_deflattening().changes_made;
 
                 // Constant propagation doesn't return changes_made but is needed for DBE
-                if (fold || dbe) deob.run_constant_propagation();
+                if (fold || dbe || deflatten) deob.run_constant_propagation();
 
                 if (changes == 0 && i > 0) break;
             }
