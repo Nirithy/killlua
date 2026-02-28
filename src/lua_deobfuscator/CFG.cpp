@@ -228,6 +228,7 @@ void CFG::remove_block(int block_id) {
 
 std::string CFG::to_dot(bool include_instructions) {
     std::stringstream ss;
+    std::vector<std::string> edges_str;
     ss << "digraph CFG {" << std::endl;
     ss << "  node [shape=box];" << std::endl;
 
@@ -262,12 +263,14 @@ std::string CFG::to_dot(bool include_instructions) {
             }
 
             for (auto const& [edge, type] : this->edges) {
-                ss << ind << "  F" << func_id << "_BB" << edge.first << " -> F" << func_id << "_BB" << edge.second;
-                if (type == EdgeType::COND_TRUE) ss << " [label=\"T\", color=\"#228B22\"]";
-                else if (type == EdgeType::COND_FALSE) ss << " [label=\"F\", color=\"#DC143C\"]";
-                else if (type == EdgeType::LOOP_BACK) ss << " [label=\"loop\", style=dashed, color=\"#4169E1\"]";
-                else if (type == EdgeType::LOOP_EXIT) ss << " [label=\"exit\"]";
-                ss << ";" << std::endl;
+                std::stringstream ess;
+                ess << "  F" << func_id << "_BB" << edge.first << " -> F" << func_id << "_BB" << edge.second;
+                if (type == EdgeType::COND_TRUE) ess << " [label=\"T\", color=\"#228B22\"]";
+                else if (type == EdgeType::COND_FALSE) ess << " [label=\"F\", color=\"#DC143C\"]";
+                else if (type == EdgeType::LOOP_BACK) ess << " [label=\"loop\", style=dashed, color=\"#4169E1\"]";
+                else if (type == EdgeType::LOOP_EXIT) ess << " [label=\"exit\"]";
+                ess << ";";
+                edges_str.push_back(ess.str());
             }
         } else {
             CFG child_cfg(p);
@@ -287,12 +290,14 @@ std::string CFG::to_dot(bool include_instructions) {
             }
 
             for (auto const& [edge, type] : child_cfg.edges) {
-                ss << ind << "  F" << func_id << "_BB" << edge.first << " -> F" << func_id << "_BB" << edge.second;
-                if (type == EdgeType::COND_TRUE) ss << " [label=\"T\", color=\"#228B22\"]";
-                else if (type == EdgeType::COND_FALSE) ss << " [label=\"F\", color=\"#DC143C\"]";
-                else if (type == EdgeType::LOOP_BACK) ss << " [label=\"loop\", style=dashed, color=\"#4169E1\"]";
-                else if (type == EdgeType::LOOP_EXIT) ss << " [label=\"exit\"]";
-                ss << ";" << std::endl;
+                std::stringstream ess;
+                ess << "  F" << func_id << "_BB" << edge.first << " -> F" << func_id << "_BB" << edge.second;
+                if (type == EdgeType::COND_TRUE) ess << " [label=\"T\", color=\"#228B22\"]";
+                else if (type == EdgeType::COND_FALSE) ess << " [label=\"F\", color=\"#DC143C\"]";
+                else if (type == EdgeType::LOOP_BACK) ess << " [label=\"loop\", style=dashed, color=\"#4169E1\"]";
+                else if (type == EdgeType::LOOP_EXIT) ess << " [label=\"exit\"]";
+                ess << ";";
+                edges_str.push_back(ess.str());
             }
         }
 
@@ -304,6 +309,10 @@ std::string CFG::to_dot(bool include_instructions) {
     };
 
     dump_cfg(dump_cfg, this->proto, 1);
+
+    for (const auto& es : edges_str) {
+        ss << es << std::endl;
+    }
 
     ss << "}" << std::endl;
     return ss.str();
