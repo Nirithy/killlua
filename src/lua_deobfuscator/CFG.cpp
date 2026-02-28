@@ -6,7 +6,7 @@
 static std::string escape_dot_label(const std::string& str) {
     std::string res;
     for (char c : str) {
-        if (c == '"') res += "\\\"";
+        if (c == '"') res += "'";
         else if (c == '\\') res += "\\\\";
         else if (c == '\n') res += "\\n";
         else if (c == '\r') res += "\\r";
