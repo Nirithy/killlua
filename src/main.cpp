@@ -122,10 +122,21 @@ DeobResultJS deobfuscate_wasm(emscripten::val input, bool fold, bool dbe, bool s
         LuaChunk chunk = Parser::parse(data);
         Deobfuscator deob(chunk.main);
 
-        if (fold) deob.run_constant_folding();
-        if (dbe) deob.run_dead_branch_elimination();
-        if (sbm) deob.run_sequential_block_merging();
-        if (dce) deob.run_dead_code_elimination();
+        // Run optimizations in a loop if any are selected, to ensure interdependent passes settle
+        if (fold || dbe || sbm || dce) {
+            for (int i = 0; i < 10; ++i) {
+                int changes = 0;
+                if (fold) changes += deob.run_constant_folding().changes_made;
+                if (dbe) changes += deob.run_dead_branch_elimination().changes_made;
+                if (sbm) changes += deob.run_sequential_block_merging().changes_made;
+                if (dce) changes += deob.run_dead_code_elimination().changes_made;
+
+                // Constant propagation doesn't return changes_made but is needed for DBE
+                if (fold || dbe) deob.run_constant_propagation();
+
+                if (changes == 0 && i > 0) break;
+            }
+        }
 
         Disassembler disasm(chunk);
         CFG cfg(chunk.main);

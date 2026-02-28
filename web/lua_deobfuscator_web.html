@@ -224,7 +224,34 @@
         }
 
         .tab-content.active {
-            display: block;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Diff Container Styles */
+        .diff-container {
+            display: flex;
+            gap: 10px;
+            flex-grow: 1;
+            min-height: 0;
+        }
+
+        .diff-panel {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .diff-header {
+            background: var(--sidebar-bg);
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: var(--text-bright);
         }
 
         /* Disassembly Output */
@@ -232,12 +259,14 @@
             background: var(--code-bg);
             color: #d4d4d4;
             padding: 15px;
-            border-radius: 4px;
+            border-radius: 0 0 4px 4px;
             margin: 0;
             font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
             line-height: 1.5;
             tab-size: 4;
             border: 1px solid var(--border-color);
+            overflow: auto;
+            flex-grow: 1;
         }
 
         /* CFG Container */
@@ -324,7 +353,7 @@
 
     <div class="main-content">
         <div class="tabs">
-            <div class="tab active" data-tab="disasm">反汇编输出</div>
+            <div class="tab active" data-tab="disasm">反汇编对比</div>
             <div class="tab" data-tab="cfg">控制流图 (CFG)</div>
             <div class="tab" data-tab="cfg-dot">CFG DOT 源码</div>
             <div class="tab" data-tab="asm">汇编处理</div>
@@ -332,7 +361,16 @@
         </div>
 
         <div id="disasm" class="tab-content active">
-            <pre id="disassemblyOutput">暂无数据。请上传并处理 Lua 字节码文件。</pre>
+            <div class="diff-container">
+                <div class="diff-panel">
+                    <div class="diff-header">原始反汇编 (Baseline)</div>
+                    <pre id="originalDisasm">暂无数据。请上传 Lua 字节码文件。</pre>
+                </div>
+                <div class="diff-panel">
+                    <div class="diff-header">优化后反汇编 (Optimized)</div>
+                    <pre id="optimizedDisasm">暂无数据。请点击“开始处理”。</pre>
+                </div>
+            </div>
         </div>
 
         <div id="cfg" class="tab-content">
@@ -6506,6 +6544,8 @@ run();
 
     <script>
         let LuaDeob = null;
+        let currentBytecode = null;
+        let currentFileName = "";
 
         // Tab Switching Logic
         document.querySelectorAll('.tab').forEach(tab => {
@@ -6605,65 +6645,98 @@ run();
             }
         };
 
+        async function updateDeobfuscation() {
+            if (!currentBytecode || !LuaDeob) return;
+
+            try {
+                const startTime = performance.now();
+                document.getElementById('status').innerText = '正在处理...';
+                document.getElementById('status').style.color = '#cccccc';
+
+                const fold = document.getElementById('foldCheck').checked;
+                const dbe = document.getElementById('dbeCheck').checked;
+                const sbm = document.getElementById('sbmCheck').checked;
+                const dce = document.getElementById('dceCheck').checked;
+
+                const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce);
+
+                const endTime = performance.now();
+                document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
+
+                if (result.success) {
+                    document.getElementById('optimizedDisasm').innerText = result.disassembly;
+                    document.getElementById('cfgDotOutput').innerText = result.dot;
+                    renderCFG(result.dot);
+                    document.getElementById('status').innerText = '处理完成';
+                    document.getElementById('status').style.color = '#4caf50';
+
+                    // Update download items if needed, or just let users download via separate button
+                } else {
+                    document.getElementById('optimizedDisasm').innerText = '错误: ' + result.error;
+                    document.getElementById('status').innerText = '处理失败';
+                    document.getElementById('status').style.color = '#f44336';
+                }
+            } catch (err) {
+                console.error(err);
+                document.getElementById('status').innerText = '运行错误: ' + err.message;
+                document.getElementById('status').style.color = '#f44336';
+            }
+        }
+
+        // Add real-time update listeners
+        ['foldCheck', 'dbeCheck', 'sbmCheck', 'dceCheck'].forEach(id => {
+            document.getElementById(id).onchange = updateDeobfuscation;
+        });
+
+        document.getElementById('fileInput').onchange = async (e) => {
+            if (e.target.files.length === 0) return;
+            const file = e.target.files[0];
+            currentFileName = file.name;
+            const reader = new FileReader();
+
+            document.getElementById('info-filename').innerText = file.name;
+            document.getElementById('info-filesize').innerText = (file.size / 1024).toFixed(2) + ' KB';
+
+            reader.onload = async (re) => {
+                currentBytecode = new Uint8Array(re.target.result);
+                const magic = Array.from(currentBytecode.slice(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                document.getElementById('info-magic').innerText = '0x' + magic.toUpperCase();
+
+                // Get baseline disassembly
+                try {
+                    const result = LuaDeob.deobfuscate(currentBytecode, false, false, false, false);
+                    if (result.success) {
+                        document.getElementById('originalDisasm').innerText = result.disassembly;
+                        updateDeobfuscation();
+                    } else {
+                        document.getElementById('originalDisasm').innerText = '解析失败: ' + result.error;
+                    }
+                } catch (err) {
+                    document.getElementById('originalDisasm').innerText = '运行错误: ' + err.message;
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        };
+
         document.getElementById('processBtn').onclick = async () => {
-            const fileInput = document.getElementById('fileInput');
-            if (fileInput.files.length === 0) {
+            if (!currentBytecode) {
                 alert('请先选择一个 Lua 字节码文件');
                 return;
             }
 
-            const file = fileInput.files[0];
-            const reader = new FileReader();
+            const fold = document.getElementById('foldCheck').checked;
+            const dbe = document.getElementById('dbeCheck').checked;
+            const sbm = document.getElementById('sbmCheck').checked;
+            const dce = document.getElementById('dceCheck').checked;
 
-            // Update UI for loading
-            document.getElementById('info-filename').innerText = file.name;
-            document.getElementById('info-filesize').innerText = (file.size / 1024).toFixed(2) + ' KB';
-
-            reader.onload = async (e) => {
-                const data = new Uint8Array(e.target.result);
-
-                // Show magic hex
-                const magic = Array.from(data.slice(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
-                document.getElementById('info-magic').innerText = '0x' + magic.toUpperCase();
-
-                try {
-                    const startTime = performance.now();
-                    document.getElementById('status').innerText = '正在处理...';
-                    document.getElementById('status').style.color = '#cccccc';
-
-                    const fold = document.getElementById('foldCheck').checked;
-                    const dbe = document.getElementById('dbeCheck').checked;
-                    const sbm = document.getElementById('sbmCheck').checked;
-                    const dce = document.getElementById('dceCheck').checked;
-
-                    const result = LuaDeob.deobfuscate(data, fold, dbe, sbm, dce);
-
-                    const endTime = performance.now();
-                    document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
-
-                    if (result.success) {
-                        document.getElementById('disassemblyOutput').innerText = result.disassembly;
-                        document.getElementById('cfgDotOutput').innerText = result.dot;
-                        renderCFG(result.dot);
-                        document.getElementById('status').innerText = '处理完成';
-                        document.getElementById('status').style.color = '#4caf50';
-
-                        // Add to processing list
-                        const baseName = file.name.replace(/\.[^/.]+$/, "");
-                        addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');
-                        addProcessItem(baseName + "_deob.lasm", result.disassembly, 'lasm');
-                    } else {
-                        document.getElementById('disassemblyOutput').innerText = '错误: ' + result.error;
-                        document.getElementById('status').innerText = '处理失败';
-                        document.getElementById('status').style.color = '#f44336';
-                    }
-                } catch (err) {
-                    console.error(err);
-                    document.getElementById('status').innerText = '运行错误: ' + err.message;
-                    document.getElementById('status').style.color = '#f44336';
-                }
-            };
-            reader.readAsArrayBuffer(file);
+            const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce);
+            if (result.success) {
+                const baseName = currentFileName.replace(/\.[^/.]+$/, "");
+                addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');
+                addProcessItem(baseName + "_deob.lasm", result.disassembly, 'lasm');
+            } else {
+                alert('处理失败: ' + result.error);
+            }
         };
 
         async function renderCFG(dot) {
@@ -6672,7 +6745,6 @@ run();
                 if (!hpccWasm) {
                     throw new Error("未找到 @hpcc-js/wasm 库。请检查网络连接或 CDN 状态。");
                 }
-                // New API for @hpcc-js/wasm
                 const graphviz = await hpccWasm.Graphviz.load();
                 const svg = graphviz.dot(dot);
                 document.getElementById('cfg-container').innerHTML = svg;
