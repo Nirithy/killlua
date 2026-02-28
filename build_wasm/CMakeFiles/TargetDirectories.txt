@@ -1,3 +1,0 @@
-/app/build_wasm/CMakeFiles/lua_deobfuscator_cpp.dir
-/app/build_wasm/CMakeFiles/edit_cache.dir
-/app/build_wasm/CMakeFiles/rebuild_cache.dir
