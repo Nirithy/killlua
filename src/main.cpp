@@ -2,6 +2,7 @@
 #include "lua_deobfuscator/Serializer.h"
 #include "lua_deobfuscator/Disassembler.h"
 #include "lua_deobfuscator/Deobfuscator.h"
+#include "lua_deobfuscator/Assembler.h"
 #ifdef EMSCRIPTEN
 #include <emscripten/bind.h>
 #endif
@@ -13,10 +14,11 @@
 using namespace lua_deobfuscator;
 
 void print_help() {
-    std::cout << "Usage: lua_deobfuscator_cpp <input.luac> [options]" << std::endl;
+    std::cout << "Usage: lua_deobfuscator_cpp <input> [options]" << std::endl;
     std::cout << "Options:" << std::endl;
     std::cout << "  -d, --disassemble    Disassemble the bytecode" << std::endl;
-    std::cout << "  -o <output.luac>     Output the (processed) bytecode" << std::endl;
+    std::cout << "  -a, --assemble       Assemble the .lasm file" << std::endl;
+    std::cout << "  -o <output>          Output file" << std::endl;
     std::cout << "  --deobfuscate        Run all deobfuscation passes" << std::endl;
 }
 
@@ -30,11 +32,35 @@ int main(int argc, char** argv) {
     std::string output_path = "";
     bool do_disassemble = false;
     bool do_deobfuscate = false;
+    bool do_assemble = false;
 
     for (int i = 2; i < argc; ++i) {
         if (std::strcmp(argv[i], "-d") == 0 || std::strcmp(argv[i], "--disassemble") == 0) do_disassemble = true;
+        else if (std::strcmp(argv[i], "-a") == 0 || std::strcmp(argv[i], "--assemble") == 0) do_assemble = true;
         else if (std::strcmp(argv[i], "-o") == 0 && i + 1 < argc) output_path = argv[++i];
         else if (std::strcmp(argv[i], "--deobfuscate") == 0) do_deobfuscate = true;
+    }
+
+    if (do_assemble) {
+        std::ifstream file(input_path);
+        if (!file) {
+            std::cerr << "Could not open " << input_path << std::endl;
+            return 1;
+        }
+        std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        try {
+            LuaChunk chunk = Assembler::assemble(content);
+            if (!output_path.empty()) {
+                auto serialized = Serializer::serialize(chunk);
+                std::ofstream out_file(output_path, std::ios::binary);
+                out_file.write(reinterpret_cast<const char*>(serialized.data()), serialized.size());
+                std::cout << "Wrote assembled bytecode to " << output_path << std::endl;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error during assembly: " << e.what() << std::endl;
+            return 1;
+        }
+        return 0;
     }
 
     std::ifstream file(input_path, std::ios::binary);
@@ -83,6 +109,7 @@ struct DeobResultJS {
     bool success;
     std::string disassembly;
     std::string dot;
+    emscripten::val bytecode;
     std::string error;
 };
 
@@ -103,9 +130,23 @@ DeobResultJS deobfuscate_wasm(emscripten::val input, bool fold, bool dbe, bool s
         Disassembler disasm(chunk);
         CFG cfg(chunk.main);
 
-        return {true, disasm.disassemble(), cfg.to_dot(), ""};
+        auto serialized = Serializer::serialize(chunk);
+        emscripten::val bytecode = emscripten::val::global("Uint8Array").new_(emscripten::typed_memory_view(serialized.size(), serialized.data()));
+
+        return {true, disasm.disassemble(), cfg.to_dot(), bytecode, ""};
     } catch (const std::exception& e) {
-        return {false, "", "", e.what()};
+        return {false, "", "", emscripten::val::null(), e.what()};
+    }
+}
+
+DeobResultJS assemble_wasm(std::string lasm) {
+    try {
+        LuaChunk chunk = Assembler::assemble(lasm);
+        auto serialized = Serializer::serialize(chunk);
+        emscripten::val bytecode = emscripten::val::global("Uint8Array").new_(emscripten::typed_memory_view(serialized.size(), serialized.data()));
+        return {true, "", "", bytecode, ""};
+    } catch (const std::exception& e) {
+        return {false, "", "", emscripten::val::null(), e.what()};
     }
 }
 
@@ -114,8 +155,10 @@ EMSCRIPTEN_BINDINGS(lua_deobfuscator) {
         .field("success", &DeobResultJS::success)
         .field("disassembly", &DeobResultJS::disassembly)
         .field("dot", &DeobResultJS::dot)
+        .field("bytecode", &DeobResultJS::bytecode)
         .field("error", &DeobResultJS::error);
 
     function("deobfuscate", &deobfuscate_wasm);
+    function("assemble", &assemble_wasm);
 }
 #endif

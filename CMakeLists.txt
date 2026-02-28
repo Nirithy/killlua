@@ -13,6 +13,7 @@ set(SOURCES
     src/lua_deobfuscator/Disassembler.cpp
     src/lua_deobfuscator/CFG.cpp
     src/lua_deobfuscator/Deobfuscator.cpp
+    src/lua_deobfuscator/Assembler.cpp
 )
 
 add_executable(lua_deobfuscator_cpp src/main.cpp ${SOURCES})
