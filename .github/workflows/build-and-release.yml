@@ -23,7 +23,7 @@ jobs:
 
       - name: Build WASM
         run: |
-          mkdir build_wasm
+          mkdir -p build_wasm
           cd build_wasm
           emcmake cmake ..
           emmake make
