@@ -231,8 +231,10 @@ std::string CFG::to_dot(bool include_instructions) {
     }
     for (auto const& [edge, type] : edges) {
         ss << "  " << edge.first << " -> " << edge.second;
-        if (type == EdgeType::COND_TRUE) ss << " [label=\"T\", color=green]";
-        else if (type == EdgeType::COND_FALSE) ss << " [label=\"F\", color=red]";
+        if (type == EdgeType::COND_TRUE) ss << " [label=\"T\", color=\"#228B22\"]";
+        else if (type == EdgeType::COND_FALSE) ss << " [label=\"F\", color=\"#DC143C\"]";
+        else if (type == EdgeType::LOOP_BACK) ss << " [label=\"loop\", style=dashed, color=\"#4169E1\"]";
+        else if (type == EdgeType::LOOP_EXIT) ss << " [label=\"exit\"]";
         ss << ";" << std::endl;
     }
     ss << "}" << std::endl;

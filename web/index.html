@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lua Bytecode Deobfuscator (WASM)</title>
+    <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.min.js"></script>
+    <style>
+        body { font-family: sans-serif; margin: 20px; background: #f0f0f0; }
+        .container { display: flex; flex-direction: column; gap: 20px; }
+        .panel { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .row { display: flex; gap: 20px; }
+        .flex1 { flex: 1; }
+        pre { background: #272822; color: #f8f8f2; padding: 10px; border-radius: 4px; overflow: auto; max-height: 600px; font-family: 'Courier New', Courier, monospace; }
+        #cfg-container { width: 100%; height: 600px; border: 1px solid #ccc; overflow: auto; background: white; }
+        .controls { margin-bottom: 10px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
+        button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; }
+        button:hover { background: #0056b3; }
+        h2 { margin-top: 0; }
+        .checkbox-group { display: flex; gap: 10px; align-items: center; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="panel">
+            <h2>Lua Deobfuscator Tool</h2>
+            <div class="controls">
+                <input type="file" id="fileInput" accept=".luac,.lua">
+                <div class="checkbox-group">
+                    <label><input type="checkbox" id="foldCheck" checked> Constant Folding</label>
+                    <label><input type="checkbox" id="dbeCheck" checked> Dead Branch</label>
+                    <label><input type="checkbox" id="sbmCheck" checked> Block Merge</label>
+                    <label><input type="checkbox" id="dceCheck" checked> Dead Code</label>
+                </div>
+                <button id="processBtn">Process Bytecode</button>
+            </div>
+            <div id="status">Loading WASM...</div>
+        </div>
+
+        <div class="row">
+            <div class="panel flex1">
+                <h2>Disassembly</h2>
+                <pre id="disassemblyOutput">No data processed yet.</pre>
+            </div>
+            <div class="panel flex1">
+                <h2>CFG Flowchart</h2>
+                <div id="cfg-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- INSERT_JS_HERE -->
+
+    <script>
+        let LuaDeob = null;
+
+        async function initWasm() {
+            if (typeof Module !== 'undefined') {
+                try {
+                    if (Module.ready) {
+                        await Module.ready;
+                    }
+                    LuaDeob = Module;
+                    document.getElementById('status').innerText = 'WASM Loaded';
+                } catch (e) {
+                    document.getElementById('status').innerText = 'WASM Load Error: ' + e;
+                }
+            } else {
+                document.getElementById('status').innerText = 'WASM Module not found';
+            }
+        }
+
+        document.getElementById('processBtn').onclick = async () => {
+            const fileInput = document.getElementById('fileInput');
+            if (fileInput.files.length === 0) {
+                alert('Please select a file');
+                return;
+            }
+
+            const file = fileInput.files[0];
+            const reader = new FileReader();
+            reader.onload = async (e) => {
+                const data = new Uint8Array(e.target.result);
+
+                try {
+                    document.getElementById('status').innerText = 'Processing...';
+
+                    const fold = document.getElementById('foldCheck').checked;
+                    const dbe = document.getElementById('dbeCheck').checked;
+                    const sbm = document.getElementById('sbmCheck').checked;
+                    const dce = document.getElementById('dceCheck').checked;
+
+                    const result = LuaDeob.deobfuscate(data, fold, dbe, sbm, dce);
+
+                    if (result.success) {
+                        document.getElementById('disassemblyOutput').innerText = result.disassembly;
+                        renderCFG(result.dot);
+                        document.getElementById('status').innerText = 'Done';
+                    } else {
+                        document.getElementById('disassemblyOutput').innerText = 'Error: ' + result.error;
+                        document.getElementById('status').innerText = 'Failed';
+                    }
+                } catch (err) {
+                    console.error(err);
+                    document.getElementById('status').innerText = 'Error: ' + err.message;
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        };
+
+        async function renderCFG(dot) {
+            try {
+                const hpccWasm = window["@hpcc-js/wasm"];
+                const svg = await hpccWasm.graphviz.layout(dot, "svg", "dot");
+                document.getElementById('cfg-container').innerHTML = svg;
+            } catch (e) {
+                document.getElementById('cfg-container').innerHTML = "CFG Render Error: " + e;
+            }
+        }
+
+        window.onload = initWasm;
+    </script>
+</body>
+</html>
