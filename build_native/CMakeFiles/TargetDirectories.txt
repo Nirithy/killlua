@@ -1,3 +1,0 @@
-/app/build_native/CMakeFiles/lua_deobfuscator_cpp.dir
-/app/build_native/CMakeFiles/edit_cache.dir
-/app/build_native/CMakeFiles/rebuild_cache.dir
