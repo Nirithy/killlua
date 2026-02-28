@@ -14,11 +14,13 @@ public:
     Disassembler(const LuaChunk& chunk);
     std::string disassemble(const std::string& closure_filter = "", bool include_children = true);
 
+public:
+    static std::string format_instruction(const Instruction& instr, std::shared_ptr<Prototype> proto, int pc, int closure_offset, const std::set<int>& jump_targets);
+    static std::string format_constant(const LuaConstant& c);
+    static std::set<int> collect_jump_targets(std::shared_ptr<Prototype> proto);
+
 private:
     void disassemble_prototype(std::shared_ptr<Prototype> proto, int func_num, bool include_children, const std::string& parent_source = "");
-    std::string format_instruction(const Instruction& instr, std::shared_ptr<Prototype> proto, int pc, int closure_offset, const std::set<int>& jump_targets);
-    std::string format_constant(const LuaConstant& c);
-    std::set<int> collect_jump_targets(std::shared_ptr<Prototype> proto);
 
     void emit(const std::string& line = "");
 
