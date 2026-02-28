@@ -1,50 +1,295 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Lua Bytecode Deobfuscator (WASM)</title>
+    <title>Lua 字节码反混淆工具 (WASM)</title>
     <script src="https://cdn.jsdelivr.net/npm/@hpcc-js/wasm/dist/index.min.js"></script>
     <style>
-        body { font-family: sans-serif; margin: 20px; background: #f0f0f0; }
-        .container { display: flex; flex-direction: column; gap: 20px; }
-        .panel { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-        .row { display: flex; gap: 20px; }
-        .flex1 { flex: 1; }
-        pre { background: #272822; color: #f8f8f2; padding: 10px; border-radius: 4px; overflow: auto; max-height: 600px; font-family: 'Courier New', Courier, monospace; }
-        #cfg-container { width: 100%; height: 600px; border: 1px solid #ccc; overflow: auto; background: white; }
-        .controls { margin-bottom: 10px; display: flex; align-items: center; gap: 15px; flex-wrap: wrap; }
-        button { padding: 10px 20px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px; }
-        button:hover { background: #0056b3; }
-        h2 { margin-top: 0; }
-        .checkbox-group { display: flex; gap: 10px; align-items: center; }
+        :root {
+            --bg-color: #1e1e1e;
+            --sidebar-bg: #252526;
+            --panel-bg: #2d2d2d;
+            --text-color: #cccccc;
+            --text-bright: #ffffff;
+            --accent-color: #007acc;
+            --accent-hover: #0062a3;
+            --border-color: #3e3e42;
+            --code-bg: #1e1e1e;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Styles */
+        .sidebar {
+            width: 300px;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            padding: 20px;
+            box-sizing: border-box;
+            flex-shrink: 0;
+        }
+
+        .sidebar h2 {
+            color: var(--text-bright);
+            font-size: 1.2rem;
+            margin-top: 0;
+            margin-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 10px;
+        }
+
+        .control-group {
+            margin-bottom: 20px;
+        }
+
+        .control-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: var(--text-bright);
+        }
+
+        .file-input-container {
+            margin-bottom: 20px;
+        }
+
+        input[type="file"] {
+            width: 100%;
+            background: var(--panel-bg);
+            border: 1px solid var(--border-color);
+            color: var(--text-color);
+            padding: 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .checkbox-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            background: var(--panel-bg);
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .checkbox-item input {
+            cursor: pointer;
+        }
+
+        button#processBtn {
+            width: 100%;
+            padding: 12px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            margin-top: 10px;
+        }
+
+        button#processBtn:hover {
+            background: var(--accent-hover);
+        }
+
+        #status {
+            margin-top: auto;
+            padding: 10px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            background: var(--panel-bg);
+            text-align: center;
+        }
+
+        /* Main Content Styles */
+        .main-content {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+            min-width: 0;
+        }
+
+        .tabs {
+            display: flex;
+            background: var(--sidebar-bg);
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab {
+            padding: 12px 24px;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab.active {
+            background: var(--panel-bg);
+            border-bottom-color: var(--accent-color);
+            color: var(--text-bright);
+        }
+
+        .tab:hover:not(.active) {
+            background: rgba(255, 255, 255, 0.05);
+        }
+
+        .tab-content {
+            flex-grow: 1;
+            display: none;
+            padding: 20px;
+            overflow: auto;
+            box-sizing: border-box;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Disassembly Output */
+        pre {
+            background: var(--code-bg);
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 4px;
+            margin: 0;
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            line-height: 1.5;
+            tab-size: 4;
+            border: 1px solid var(--border-color);
+        }
+
+        /* CFG Container */
+        #cfg-container {
+            width: 100%;
+            height: 100%;
+            background: white;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: auto;
+        }
+
+        #cfg-container svg {
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* File Info Styles */
+        .info-card {
+            background: var(--panel-bg);
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid var(--border-color);
+            max-width: 600px;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .info-item:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            font-weight: bold;
+            color: var(--text-bright);
+        }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="panel">
-            <h2>Lua Deobfuscator Tool</h2>
-            <div class="controls">
-                <input type="file" id="fileInput" accept=".luac,.lua">
-                <div class="checkbox-group">
-                    <label><input type="checkbox" id="foldCheck" checked> Constant Folding</label>
-                    <label><input type="checkbox" id="dbeCheck" checked> Dead Branch</label>
-                    <label><input type="checkbox" id="sbmCheck" checked> Block Merge</label>
-                    <label><input type="checkbox" id="dceCheck" checked> Dead Code</label>
-                </div>
-                <button id="processBtn">Process Bytecode</button>
-            </div>
-            <div id="status">Loading WASM...</div>
+    <div class="sidebar">
+        <h2>Lua 反混淆编译器</h2>
+
+        <div class="file-input-container">
+            <label for="fileInput">选择 Lua 字节码文件</label>
+            <input type="file" id="fileInput" accept=".luac,.lua">
         </div>
 
-        <div class="row">
-            <div class="panel flex1">
-                <h2>Disassembly</h2>
-                <pre id="disassemblyOutput">No data processed yet.</pre>
+        <div class="control-group">
+            <label>优化选项</label>
+            <div class="checkbox-group">
+                <label class="checkbox-item">
+                    <input type="checkbox" id="foldCheck" checked> 常量折叠 (Folding)
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="dbeCheck" checked> 死分支消除 (Dead Branch)
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="sbmCheck" checked> 顺序块合并 (Block Merge)
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="dceCheck" checked> 死代码消除 (Dead Code)
+                </label>
             </div>
-            <div class="panel flex1">
-                <h2>CFG Flowchart</h2>
-                <div id="cfg-container"></div>
+        </div>
+
+        <button id="processBtn">开始处理字节码</button>
+
+        <div id="status">等待 WASM 加载...</div>
+    </div>
+
+    <div class="main-content">
+        <div class="tabs">
+            <div class="tab active" data-tab="disasm">反汇编输出</div>
+            <div class="tab" data-tab="cfg">控制流图 (CFG)</div>
+            <div class="tab" data-tab="info">文件详情</div>
+        </div>
+
+        <div id="disasm" class="tab-content active">
+            <pre id="disassemblyOutput">暂无数据。请上传并处理 Lua 字节码文件。</pre>
+        </div>
+
+        <div id="cfg" class="tab-content">
+            <div id="cfg-container">
+                <p style="color: #333">尚未生成控制流图</p>
+            </div>
+        </div>
+
+        <div id="info" class="tab-content">
+            <div class="info-card">
+                <div class="info-item">
+                    <span class="info-label">文件名</span>
+                    <span id="info-filename">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">文件大小</span>
+                    <span id="info-filesize">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">魔数 (Magic)</span>
+                    <span id="info-magic">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">处理时间</span>
+                    <span id="info-time">-</span>
+                </div>
             </div>
         </div>
     </div>
@@ -6171,12 +6416,21 @@ createWasm();
 run();
 
 // end include: postamble.js
-
-
 </script>
 
     <script>
         let LuaDeob = null;
+
+        // Tab Switching Logic
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.onclick = () => {
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+                tab.classList.add('active');
+                document.getElementById(tab.dataset.tab).classList.add('active');
+            };
+        });
 
         async function initWasm() {
             if (typeof Module !== 'undefined') {
@@ -6185,29 +6439,43 @@ run();
                         await Module.ready;
                     }
                     LuaDeob = Module;
-                    document.getElementById('status').innerText = 'WASM Loaded';
+                    document.getElementById('status').innerText = 'WASM 加载成功';
+                    document.getElementById('status').style.color = '#4caf50';
                 } catch (e) {
-                    document.getElementById('status').innerText = 'WASM Load Error: ' + e;
+                    document.getElementById('status').innerText = 'WASM 加载失败: ' + e;
+                    document.getElementById('status').style.color = '#f44336';
                 }
             } else {
-                document.getElementById('status').innerText = 'WASM Module not found';
+                document.getElementById('status').innerText = '未找到 WASM 模块';
+                document.getElementById('status').style.color = '#f44336';
             }
         }
 
         document.getElementById('processBtn').onclick = async () => {
             const fileInput = document.getElementById('fileInput');
             if (fileInput.files.length === 0) {
-                alert('Please select a file');
+                alert('请先选择一个 Lua 字节码文件');
                 return;
             }
 
             const file = fileInput.files[0];
             const reader = new FileReader();
+
+            // Update UI for loading
+            document.getElementById('info-filename').innerText = file.name;
+            document.getElementById('info-filesize').innerText = (file.size / 1024).toFixed(2) + ' KB';
+
             reader.onload = async (e) => {
                 const data = new Uint8Array(e.target.result);
 
+                // Show magic hex
+                const magic = Array.from(data.slice(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+                document.getElementById('info-magic').innerText = '0x' + magic.toUpperCase();
+
                 try {
-                    document.getElementById('status').innerText = 'Processing...';
+                    const startTime = performance.now();
+                    document.getElementById('status').innerText = '正在处理...';
+                    document.getElementById('status').style.color = '#cccccc';
 
                     const fold = document.getElementById('foldCheck').checked;
                     const dbe = document.getElementById('dbeCheck').checked;
@@ -6216,17 +6484,23 @@ run();
 
                     const result = LuaDeob.deobfuscate(data, fold, dbe, sbm, dce);
 
+                    const endTime = performance.now();
+                    document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
+
                     if (result.success) {
                         document.getElementById('disassemblyOutput').innerText = result.disassembly;
                         renderCFG(result.dot);
-                        document.getElementById('status').innerText = 'Done';
+                        document.getElementById('status').innerText = '处理完成';
+                        document.getElementById('status').style.color = '#4caf50';
                     } else {
-                        document.getElementById('disassemblyOutput').innerText = 'Error: ' + result.error;
-                        document.getElementById('status').innerText = 'Failed';
+                        document.getElementById('disassemblyOutput').innerText = '错误: ' + result.error;
+                        document.getElementById('status').innerText = '处理失败';
+                        document.getElementById('status').style.color = '#f44336';
                     }
                 } catch (err) {
                     console.error(err);
-                    document.getElementById('status').innerText = 'Error: ' + err.message;
+                    document.getElementById('status').innerText = '运行错误: ' + err.message;
+                    document.getElementById('status').style.color = '#f44336';
                 }
             };
             reader.readAsArrayBuffer(file);
@@ -6238,7 +6512,7 @@ run();
                 const svg = await hpccWasm.graphviz.layout(dot, "svg", "dot");
                 document.getElementById('cfg-container').innerHTML = svg;
             } catch (e) {
-                document.getElementById('cfg-container').innerHTML = "CFG Render Error: " + e;
+                document.getElementById('cfg-container').innerHTML = `<p style="color: red; padding: 20px;">CFG 渲染错误: ${e}</p>`;
             }
         }
 
