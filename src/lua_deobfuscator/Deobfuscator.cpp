@@ -66,6 +66,87 @@ DeobfuscationResult Deobfuscator::run_constant_folding() {
     return {changes > 0, "Constant Folding", changes, "Folded " + std::to_string(changes) + " expressions"};
 }
 
+void Deobfuscator::perform_constant_propagation() {
+    if (!cfg) cfg = std::make_unique<CFG>(proto);
+
+    block_entry_regs.clear();
+    block_exit_regs.clear();
+
+    for (auto const& [id, block] : cfg->blocks) {
+        block_entry_regs[id].assign(256, {RegValue::UNKNOWN, {}});
+        block_exit_regs[id].assign(256, {RegValue::UNKNOWN, {}});
+    }
+
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (auto const& [id, block] : cfg->blocks) {
+            std::vector<RegValue> entry(256, {RegValue::UNKNOWN, {}});
+            if (!block->is_entry) {
+                bool first = true;
+                for (int pred_id : block->predecessors) {
+                    if (block_exit_regs[pred_id].empty()) continue;
+
+                    const auto& pred_exit = block_exit_regs[pred_id];
+                    if (first) { entry = pred_exit; first = false; }
+                    else {
+                        for (int i = 0; i < 256; ++i) {
+                            if (entry[i].state == RegValue::MULTIPLE) continue;
+                            if (entry[i].state == RegValue::UNKNOWN) {
+                                entry[i] = pred_exit[i];
+                            } else if (pred_exit[i].state == RegValue::UNKNOWN) {
+                                // keep entry[i]
+                            } else if (entry[i] != pred_exit[i]) {
+                                entry[i].state = RegValue::MULTIPLE;
+                            }
+                        }
+                    }
+                }
+                if (first) continue;
+            }
+            if (entry != block_entry_regs[id]) { block_entry_regs[id] = entry; changed = true; }
+
+            std::vector<RegValue> current = entry;
+            for (const auto& instr : block->instructions) {
+                Opcode op = static_cast<Opcode>(instr.opcode);
+                if (op == Opcode::LOADK) {
+                    current[instr.a].state = RegValue::CONSTANT;
+                    current[instr.a].val = proto->constants[instr.bx];
+                } else if (op == Opcode::LOADBOOL) {
+                    current[instr.a].state = RegValue::CONSTANT;
+                    current[instr.a].val.type = LuaConstantType::BOOLEAN;
+                    current[instr.a].val.value = (instr.b != 0);
+                } else if (op == Opcode::LOADNIL) {
+                    for (int i = instr.a; i <= instr.a + instr.b; ++i) {
+                        current[i].state = RegValue::CONSTANT;
+                        current[i].val.type = LuaConstantType::NIL;
+                    }
+                } else if (op == Opcode::MOVE) {
+                    current[instr.a] = current[instr.b];
+                } else {
+                    if (op != Opcode::EQ && op != Opcode::LT && op != Opcode::LE &&
+                        op != Opcode::NEQ && op != Opcode::GE && op != Opcode::GT &&
+                        op != Opcode::TEST && op != Opcode::TESTSET &&
+                        op != Opcode::JMP && op != Opcode::FORLOOP && op != Opcode::TFORLOOP &&
+                        op != Opcode::SETTABLE && op != Opcode::SETTABUP && op != Opcode::SETUPVAL) {
+                        current[instr.a].state = RegValue::MULTIPLE;
+                    }
+                }
+            }
+
+            if (current != block_exit_regs[id]) {
+                block_exit_regs[id] = current;
+                changed = true;
+            }
+        }
+    }
+}
+
+DeobfuscationResult Deobfuscator::run_constant_propagation() {
+    perform_constant_propagation();
+    return {true, "Constant Propagation", 0, "Performed constant propagation"};
+}
+
 DeobfuscationResult Deobfuscator::run_dead_code_elimination() {
     if (!cfg) cfg = std::make_unique<CFG>(proto);
     auto unreachable = cfg->find_unreachable_blocks();
@@ -149,7 +230,7 @@ int Deobfuscator::simplify_jmp_chains() {
 }
 
 DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
-    if (!cfg) cfg = std::make_unique<CFG>(proto);
+    perform_constant_propagation();
 
     // 1. Find garbage blocks
     std::set<int> garbage;
@@ -178,20 +259,95 @@ DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
     for (auto const& [id, block] : cfg->blocks) {
         if (garbage.count(id)) continue;
         if (block->instructions.empty()) continue;
+
         auto& last_instr = block->instructions.back();
-        if (conditional_ops.count(static_cast<Opcode>(last_instr.opcode))) {
+        Opcode op = static_cast<Opcode>(last_instr.opcode);
+        if (conditional_ops.count(op)) {
             std::vector<int> succs(block->successors.begin(), block->successors.end());
             if (succs.size() == 2) {
                 int s1 = succs[0], s2 = succs[1];
                 bool g1 = garbage.count(s1), g2 = garbage.count(s2);
+
+                // Try to evaluate condition
+                bool known_outcome = false;
+                bool result = false;
+
+                auto const& regs = block_entry_regs[id];
+                std::vector<RegValue> current = regs;
+                for (size_t i = 0; i < block->instructions.size() - 1; ++i) {
+                    const auto& instr = block->instructions[i];
+                    Opcode iop = static_cast<Opcode>(instr.opcode);
+                    if (iop == Opcode::LOADK) { current[instr.a].state = RegValue::CONSTANT; current[instr.a].val = proto->constants[instr.bx]; }
+                    else if (iop == Opcode::LOADBOOL) { current[instr.a].state = RegValue::CONSTANT; current[instr.a].val.type = LuaConstantType::BOOLEAN; current[instr.a].val.value = (instr.b != 0); }
+                    else if (iop == Opcode::LOADNIL) { for (int j = instr.a; j <= instr.a + instr.b; ++j) { current[j].state = RegValue::CONSTANT; current[j].val.type = LuaConstantType::NIL; } }
+                    else if (iop == Opcode::MOVE) { current[instr.a] = current[instr.b]; }
+                    else if (iop != Opcode::EQ && iop != Opcode::LT && iop != Opcode::LE && iop != Opcode::NEQ && iop != Opcode::GE && iop != Opcode::GT && iop != Opcode::TEST && iop != Opcode::TESTSET && iop != Opcode::JMP && iop != Opcode::FORLOOP && iop != Opcode::TFORLOOP && iop != Opcode::SETTABLE && iop != Opcode::SETTABUP && iop != Opcode::SETUPVAL) {
+                        current[instr.a].state = RegValue::MULTIPLE;
+                    }
+                }
+
+                auto get_val = [&](int reg_or_k) -> std::pair<bool, LuaConstant> {
+                    if (ISK(reg_or_k)) {
+                        int idx = INDEXK(reg_or_k);
+                        if (idx >= 0 && idx < (int)proto->constants.size()) return {true, proto->constants[idx]};
+                    } else {
+                        if (reg_or_k >= 0 && reg_or_k < 256 && current[reg_or_k].state == RegValue::CONSTANT) return {true, current[reg_or_k].val};
+                    }
+                    return {false, {}};
+                };
+
+                if (op == Opcode::EQ || op == Opcode::LT || op == Opcode::LE || op == Opcode::NEQ || op == Opcode::GE || op == Opcode::GT) {
+                    auto [bk, vb] = get_val(last_instr.b);
+                    auto [ck, vc] = get_val(last_instr.c);
+                    if (bk && ck && vb.type == vc.type) {
+                        known_outcome = true;
+                        if (vb.type == LuaConstantType::NUMBER) result = (std::get<double>(vb.value) == std::get<double>(vc.value));
+                        else if (vb.type == LuaConstantType::INT) result = (std::get<int64_t>(vb.value) == std::get<int64_t>(vc.value));
+                        else if (vb.type == LuaConstantType::BOOLEAN) result = (std::get<bool>(vb.value) == std::get<bool>(vc.value));
+                        else if (vb.type == LuaConstantType::STRING) result = (std::get<std::string>(vb.value) == std::get<std::string>(vc.value));
+                        else if (vb.type == LuaConstantType::NIL) result = true;
+
+                        if (op == Opcode::EQ) {
+                        } else if (op == Opcode::NEQ) {
+                            result = !result;
+                        } else if (op == Opcode::LT || op == Opcode::LE || op == Opcode::GE || op == Opcode::GT) {
+                            double db = (vb.type == LuaConstantType::INT) ? (double)std::get<int64_t>(vb.value) : std::get<double>(vb.value);
+                            double dc = (vc.type == LuaConstantType::INT) ? (double)std::get<int64_t>(vc.value) : std::get<double>(vc.value);
+                            if (op == Opcode::LT) result = (db < dc);
+                            else if (op == Opcode::LE) result = (db <= dc);
+                            else if (op == Opcode::GE) result = (db >= dc);
+                            else if (op == Opcode::GT) result = (db > dc);
+                        }
+                        result = (result != (last_instr.a != 0));
+                    }
+                } else if (op == Opcode::TEST || op == Opcode::TESTSET) {
+                    auto [ak, va] = get_val(op == Opcode::TEST ? last_instr.a : last_instr.b);
+                    if (ak) {
+                        known_outcome = true;
+                        bool cond = (va.type != LuaConstantType::NIL && (va.type != LuaConstantType::BOOLEAN || std::get<bool>(va.value)));
+                        result = (cond == (last_instr.c != 0));
+                    }
+                }
+
+                if (known_outcome) {
+                    int valid_succ = -1;
+                    int garbage_succ = -1;
+                    for (int s : succs) {
+                        if (cfg->edges[{id, s}] == (result ? EdgeType::COND_TRUE : EdgeType::COND_FALSE)) valid_succ = s;
+                        else garbage_succ = s;
+                    }
+                    if (valid_succ != -1 && garbage_succ != -1) {
+                        g1 = (s1 == garbage_succ);
+                        g2 = (s2 == garbage_succ);
+                    }
+                }
+
                 if ((g1 && !g2) || (!g1 && g2)) {
                     int valid_succ = g1 ? s2 : s1;
                     int garbage_succ = g1 ? s1 : s2;
 
-                    // Expansion logic (simplified)
                     Opcode op = static_cast<Opcode>(last_instr.opcode);
                     if (op == Opcode::TESTSET) {
-                        // if garbage is COND_FALSE (next instr), then MOVE
                         EdgeType et = cfg->edges[{id, valid_succ}];
                         if (et == EdgeType::COND_FALSE) {
                             last_instr = Instruction::encode_new(static_cast<int>(Opcode::MOVE), last_instr.a, last_instr.b);
@@ -219,7 +375,6 @@ DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
                         }
                     }
 
-                    // Update CFG
                     block->successors.erase(garbage_succ);
                     cfg->blocks[garbage_succ]->predecessors.erase(id);
                     cfg->edges.erase({id, garbage_succ});
@@ -234,6 +389,7 @@ DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
     if (changes > 0) rebuild_from_cfg();
     return {true, "Dead Branch Elimination", changes, "Eliminated " + std::to_string(changes) + " dead branch(es)"};
 }
+
 DeobfuscationResult Deobfuscator::run_sequential_block_merging() {
     if (!cfg) cfg = std::make_unique<CFG>(proto);
     int changes = simplify_jmp_chains();
@@ -251,7 +407,6 @@ DeobfuscationResult Deobfuscator::run_sequential_block_merging() {
                 int b_id = *block_a->successors.begin();
                 auto block_b = cfg->blocks[b_id];
                 if (block_b->predecessors.size() == 1 && !block_b->is_entry) {
-                    // Merge A and B
                     if (!block_a->instructions.empty()) {
                         Opcode op = static_cast<Opcode>(block_a->instructions.back().opcode);
                         if (op == Opcode::JMP) block_a->instructions.pop_back();
@@ -300,15 +455,18 @@ std::vector<DeobfuscationResult> Deobfuscator::run_all_passes(int max_iterations
         all_results.push_back(res);
         changes_this_round += res.changes_made;
 
+        res = run_constant_propagation();
+        all_results.push_back(res);
+
         res = run_dead_branch_elimination();
         all_results.push_back(res);
         changes_this_round += res.changes_made;
 
-        res = run_sequential_block_merging();
+        res = run_dead_code_elimination();
         all_results.push_back(res);
         changes_this_round += res.changes_made;
 
-        res = run_dead_code_elimination();
+        res = run_sequential_block_merging();
         all_results.push_back(res);
         changes_this_round += res.changes_made;
 

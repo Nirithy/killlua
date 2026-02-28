@@ -326,6 +326,7 @@
         <div class="tabs">
             <div class="tab active" data-tab="disasm">反汇编输出</div>
             <div class="tab" data-tab="cfg">控制流图 (CFG)</div>
+            <div class="tab" data-tab="cfg-dot">CFG DOT 源码</div>
             <div class="tab" data-tab="asm">汇编处理</div>
             <div class="tab" data-tab="info">文件详情</div>
         </div>
@@ -338,6 +339,10 @@
             <div id="cfg-container">
                 <p style="color: #333">尚未生成控制流图</p>
             </div>
+        </div>
+
+        <div id="cfg-dot" class="tab-content">
+            <pre id="cfgDotOutput">尚未生成 DOT 源码。</pre>
         </div>
 
         <div id="asm" class="tab-content">
@@ -6638,6 +6643,7 @@ run();
 
                     if (result.success) {
                         document.getElementById('disassemblyOutput').innerText = result.disassembly;
+                        document.getElementById('cfgDotOutput').innerText = result.dot;
                         renderCFG(result.dot);
                         document.getElementById('status').innerText = '处理完成';
                         document.getElementById('status').style.color = '#4caf50';
@@ -6662,7 +6668,10 @@ run();
 
         async function renderCFG(dot) {
             try {
-                const hpccWasm = window["@hpcc-js/wasm"];
+                const hpccWasm = window["@hpcc-js/wasm"] || window.hpccWasm;
+                if (!hpccWasm) {
+                    throw new Error("未找到 @hpcc-js/wasm 库。请检查网络连接或 CDN 状态。");
+                }
                 // New API for @hpcc-js/wasm
                 const graphviz = await hpccWasm.Graphviz.load();
                 const svg = graphviz.dot(dot);
