@@ -1,0 +1,47 @@
+name: Build and Release WASM
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Emscripten
+        uses: mymindstorm/setup-emsdk@v13
+        with:
+          version: 3.1.31
+
+      - name: Build WASM
+        run: |
+          mkdir build_wasm
+          cd build_wasm
+          emcmake cmake ..
+          emmake make
+
+      - name: Merge Web Files
+        run: |
+          python3 web/merge_web.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lua_deobfuscator_web
+          path: web/lua_deobfuscator_web.html
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: web/lua_deobfuscator_web.html
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
