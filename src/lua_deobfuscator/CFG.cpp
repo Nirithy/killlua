@@ -217,26 +217,75 @@ std::string CFG::to_dot(bool include_instructions) {
     std::stringstream ss;
     ss << "digraph CFG {" << std::endl;
     ss << "  node [shape=box];" << std::endl;
-    for (auto const& [id, block] : blocks) {
-        ss << "  " << id << " [label=\"BB" << id << " [PC " << block->start_pc << "-" << (block->end_pc - 1) << "]";
-        if (include_instructions) {
-            for (size_t i = 0; i < block->instructions.size(); ++i) {
-                ss << "\\n" << (block->start_pc + i) << ": " << block->instructions[i].opcode_name;
+
+    int global_func_id = 0;
+
+    auto dump_cfg = [&](auto& self, std::shared_ptr<Prototype> p, int indent_level) -> void {
+        int func_id = global_func_id++;
+        std::string ind(indent_level * 2, ' ');
+        ss << ind << "subgraph cluster_" << func_id << " {" << std::endl;
+        ss << ind << "  label=\"Function " << (func_id == 0 ? "Main" : std::to_string(func_id)) << "\";" << std::endl;
+        ss << ind << "  style=dashed;" << std::endl;
+        ss << ind << "  color=gray;" << std::endl;
+
+        // If p is the same as this->proto, we just use this->blocks and this->edges
+        // otherwise we create a new CFG for the child prototype
+        if (p == this->proto) {
+            for (auto const& [id, block] : this->blocks) {
+                ss << ind << "  F" << func_id << "_BB" << id << " [label=\"BB" << id << " [PC " << block->start_pc << "-" << (block->end_pc - 1) << "]";
+                if (include_instructions) {
+                    for (size_t i = 0; i < block->instructions.size(); ++i) {
+                        ss << "\\n" << (block->start_pc + i) << ": " << block->instructions[i].opcode_name;
+                    }
+                }
+                ss << "\"";
+                if (block->is_entry) ss << ", style=filled, fillcolor=green";
+                else if (block->is_exit) ss << ", style=filled, fillcolor=red";
+                ss << "];" << std::endl;
+            }
+
+            for (auto const& [edge, type] : this->edges) {
+                ss << ind << "  F" << func_id << "_BB" << edge.first << " -> F" << func_id << "_BB" << edge.second;
+                if (type == EdgeType::COND_TRUE) ss << " [label=\"T\", color=\"#228B22\"]";
+                else if (type == EdgeType::COND_FALSE) ss << " [label=\"F\", color=\"#DC143C\"]";
+                else if (type == EdgeType::LOOP_BACK) ss << " [label=\"loop\", style=dashed, color=\"#4169E1\"]";
+                else if (type == EdgeType::LOOP_EXIT) ss << " [label=\"exit\"]";
+                ss << ";" << std::endl;
+            }
+        } else {
+            CFG child_cfg(p);
+            for (auto const& [id, block] : child_cfg.blocks) {
+                ss << ind << "  F" << func_id << "_BB" << id << " [label=\"BB" << id << " [PC " << block->start_pc << "-" << (block->end_pc - 1) << "]";
+                if (include_instructions) {
+                    for (size_t i = 0; i < block->instructions.size(); ++i) {
+                        ss << "\\n" << (block->start_pc + i) << ": " << block->instructions[i].opcode_name;
+                    }
+                }
+                ss << "\"";
+                if (block->is_entry) ss << ", style=filled, fillcolor=green";
+                else if (block->is_exit) ss << ", style=filled, fillcolor=red";
+                ss << "];" << std::endl;
+            }
+
+            for (auto const& [edge, type] : child_cfg.edges) {
+                ss << ind << "  F" << func_id << "_BB" << edge.first << " -> F" << func_id << "_BB" << edge.second;
+                if (type == EdgeType::COND_TRUE) ss << " [label=\"T\", color=\"#228B22\"]";
+                else if (type == EdgeType::COND_FALSE) ss << " [label=\"F\", color=\"#DC143C\"]";
+                else if (type == EdgeType::LOOP_BACK) ss << " [label=\"loop\", style=dashed, color=\"#4169E1\"]";
+                else if (type == EdgeType::LOOP_EXIT) ss << " [label=\"exit\"]";
+                ss << ";" << std::endl;
             }
         }
-        ss << "\"";
-        if (block->is_entry) ss << ", style=filled, fillcolor=green";
-        else if (block->is_exit) ss << ", style=filled, fillcolor=red";
-        ss << "];" << std::endl;
-    }
-    for (auto const& [edge, type] : edges) {
-        ss << "  " << edge.first << " -> " << edge.second;
-        if (type == EdgeType::COND_TRUE) ss << " [label=\"T\", color=\"#228B22\"]";
-        else if (type == EdgeType::COND_FALSE) ss << " [label=\"F\", color=\"#DC143C\"]";
-        else if (type == EdgeType::LOOP_BACK) ss << " [label=\"loop\", style=dashed, color=\"#4169E1\"]";
-        else if (type == EdgeType::LOOP_EXIT) ss << " [label=\"exit\"]";
-        ss << ";" << std::endl;
-    }
+
+        for (auto child : p->protos) {
+            self(self, child, indent_level + 1);
+        }
+
+        ss << ind << "}" << std::endl;
+    };
+
+    dump_cfg(dump_cfg, this->proto, 1);
+
     ss << "}" << std::endl;
     return ss.str();
 }
