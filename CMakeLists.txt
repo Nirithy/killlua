@@ -24,11 +24,11 @@ if(EMSCRIPTEN)
     set_target_properties(lua_deobfuscator_cpp PROPERTIES SUFFIX ".js")
 
     target_link_options(lua_deobfuscator_cpp PRIVATE
-        "-s WASM=1"
-        "-s ALLOW_MEMORY_GROWTH=1"
-        "-s EXPORTED_RUNTIME_METHODS=['FS','ccall','cwrap']"
-        "-s MODULARIZE=0"
-        "-s SINGLE_FILE=0"
+        "-sWASM=1"
+        "-sALLOW_MEMORY_GROWTH=1"
+        "-sEXPORTED_RUNTIME_METHODS=['FS','ccall','cwrap']"
+        "-sMODULARIZE=0"
+        "-sSINGLE_FILE=0"
         "--bind"
     )
 endif()
