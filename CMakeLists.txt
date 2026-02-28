@@ -24,10 +24,10 @@ if(EMSCRIPTEN)
 
     target_link_options(lua_deobfuscator_cpp PRIVATE
         "-s WASM=1"
-        "-s EXPORTED_FUNCTIONS=['_main']"
+        "-s ALLOW_MEMORY_GROWTH=1"
         "-s EXPORTED_RUNTIME_METHODS=['FS','ccall','cwrap']"
-        "-s MODULARIZE=1"
-        "-s EXPORT_NAME='LuaDeobfuscator'"
+        "-s MODULARIZE=0"
+        "-s SINGLE_FILE=0"
         "--bind"
     )
 endif()

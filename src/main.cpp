@@ -2,6 +2,9 @@
 #include "lua_deobfuscator/Serializer.h"
 #include "lua_deobfuscator/Disassembler.h"
 #include "lua_deobfuscator/Deobfuscator.h"
+#ifdef EMSCRIPTEN
+#include <emscripten/bind.h>
+#endif
 #include <iostream>
 #include <fstream>
 #include <vector>
@@ -70,3 +73,49 @@ int main(int argc, char** argv) {
 
     return 0;
 }
+
+#ifdef EMSCRIPTEN
+#include <emscripten/val.h>
+
+using namespace emscripten;
+
+struct DeobResultJS {
+    bool success;
+    std::string disassembly;
+    std::string dot;
+    std::string error;
+};
+
+DeobResultJS deobfuscate_wasm(emscripten::val input, bool fold, bool dbe, bool sbm, bool dce) {
+    try {
+        auto l = input["length"].as<unsigned>();
+        std::vector<uint8_t> data(l);
+        for(unsigned i=0; i<l; ++i) data[i] = input[i].as<uint8_t>();
+
+        LuaChunk chunk = Parser::parse(data);
+        Deobfuscator deob(chunk.main);
+
+        if (fold) deob.run_constant_folding();
+        if (dbe) deob.run_dead_branch_elimination();
+        if (sbm) deob.run_sequential_block_merging();
+        if (dce) deob.run_dead_code_elimination();
+
+        Disassembler disasm(chunk);
+        CFG cfg(chunk.main);
+
+        return {true, disasm.disassemble(), cfg.to_dot(), ""};
+    } catch (const std::exception& e) {
+        return {false, "", "", e.what()};
+    }
+}
+
+EMSCRIPTEN_BINDINGS(lua_deobfuscator) {
+    value_object<DeobResultJS>("DeobResult")
+        .field("success", &DeobResultJS::success)
+        .field("disassembly", &DeobResultJS::disassembly)
+        .field("dot", &DeobResultJS::dot)
+        .field("error", &DeobResultJS::error);
+
+    function("deobfuscate", &deobfuscate_wasm);
+}
+#endif

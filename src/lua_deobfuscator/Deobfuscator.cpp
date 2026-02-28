@@ -38,7 +38,13 @@ DeobfuscationResult Deobfuscator::run_constant_folding() {
                         else if (op == Opcode::DIV) { if (vc != 0) res = vb / vc; else valid = false; }
                         else if (op == Opcode::MOD) { if (vc != 0) res = std::fmod(vb, vc); else valid = false; }
                         else if (op == Opcode::POW) res = std::pow(vb, vc);
-                        else valid = false; // Int-only ops omitted for brevity
+                        else if (op == Opcode::IDIV) { if (vc != 0) res = std::floor(vb / vc); else valid = false; }
+                        else if (op == Opcode::BAND) res = static_cast<double>(static_cast<int64_t>(vb) & static_cast<int64_t>(vc));
+                        else if (op == Opcode::BOR) res = static_cast<double>(static_cast<int64_t>(vb) | static_cast<int64_t>(vc));
+                        else if (op == Opcode::BXOR) res = static_cast<double>(static_cast<int64_t>(vb) ^ static_cast<int64_t>(vc));
+                        else if (op == Opcode::SHL) res = static_cast<double>(static_cast<int64_t>(vb) << static_cast<int64_t>(vc));
+                        else if (op == Opcode::SHR) res = static_cast<double>(static_cast<int64_t>(vb) >> static_cast<int64_t>(vc));
+                        else valid = false;
 
                         if (valid) {
                             // Replacement with LOADK
@@ -92,6 +98,56 @@ void Deobfuscator::rebuild_from_cfg() {
     proto->code = cfg->rebuild_code();
     cfg.reset();
 }
+
+bool Deobfuscator::is_jmp_only_block(int block_id) {
+    if (!cfg || !cfg->blocks.count(block_id)) return false;
+    auto block = cfg->blocks[block_id];
+    return block->instructions.size() == 1 && static_cast<Opcode>(block->instructions[0].opcode) == Opcode::JMP;
+}
+
+int Deobfuscator::find_jmp_chain_target(int block_id, std::set<int>& visited) {
+    if (visited.count(block_id)) return -1;
+    visited.insert(block_id);
+    if (!is_jmp_only_block(block_id)) return block_id;
+    auto block = cfg->blocks[block_id];
+    if (block->successors.size() != 1) return block_id;
+    return find_jmp_chain_target(*block->successors.begin(), visited);
+}
+
+int Deobfuscator::simplify_jmp_chains() {
+    int changes = 0;
+    std::vector<int> jmp_blocks;
+    for (auto const& [id, block] : cfg->blocks) if (is_jmp_only_block(id)) jmp_blocks.push_back(id);
+
+    for (int jmp_id : jmp_blocks) {
+        std::set<int> visited;
+        int final_target = find_jmp_chain_target(jmp_id, visited);
+        if (final_target == -1 || final_target == jmp_id) continue;
+
+        auto block_jmp = cfg->blocks[jmp_id];
+        if (block_jmp->successors.size() != 1 || *block_jmp->successors.begin() == final_target) continue;
+
+        std::vector<int> preds(block_jmp->predecessors.begin(), block_jmp->predecessors.end());
+        for (int pred_id : preds) {
+            if (is_jmp_only_block(pred_id)) continue;
+            auto pred_block = cfg->blocks[pred_id];
+
+            EdgeType et = cfg->edges[{pred_id, jmp_id}];
+            cfg->edges.erase({pred_id, jmp_id});
+            pred_block->successors.erase(jmp_id);
+            block_jmp->predecessors.erase(pred_id);
+
+            if (!pred_block->successors.count(final_target)) {
+                pred_block->successors.insert(final_target);
+                cfg->blocks[final_target]->predecessors.insert(pred_id);
+                cfg->edges[{pred_id, final_target}] = et;
+            }
+            changes++;
+        }
+    }
+    return changes;
+}
+
 DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
     if (!cfg) cfg = std::make_unique<CFG>(proto);
 
@@ -144,8 +200,24 @@ DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
                         }
                     } else if (op == Opcode::TEST || op == Opcode::EQ || op == Opcode::LT || op == Opcode::LE || op == Opcode::NEQ || op == Opcode::GE || op == Opcode::GT) {
                         block->instructions.pop_back();
+                    } else if (op == Opcode::FORLOOP) {
+                        int a = last_instr.a;
+                        EdgeType et = cfg->edges[{id, valid_succ}];
+                        block->instructions.pop_back();
+                        if (et == EdgeType::LOOP_BACK) {
+                            block->instructions.push_back(Instruction::encode_new(static_cast<int>(Opcode::ADD), a, a, a + 2));
+                            block->instructions.push_back(Instruction::encode_new(static_cast<int>(Opcode::MOVE), a + 3, a));
+                        } else {
+                            block->instructions.push_back(Instruction::encode_new(static_cast<int>(Opcode::ADD), a, a, a + 2));
+                        }
+                    } else if (op == Opcode::TFORLOOP) {
+                        int a = last_instr.a;
+                        EdgeType et = cfg->edges[{id, valid_succ}];
+                        block->instructions.pop_back();
+                        if (et == EdgeType::LOOP_BACK) {
+                            block->instructions.push_back(Instruction::encode_new(static_cast<int>(Opcode::MOVE), a, a + 1));
+                        }
                     }
-                    // FORLOOP/TFORLOOP expansion is omitted for brevity
 
                     // Update CFG
                     block->successors.erase(garbage_succ);
@@ -164,7 +236,7 @@ DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
 }
 DeobfuscationResult Deobfuscator::run_sequential_block_merging() {
     if (!cfg) cfg = std::make_unique<CFG>(proto);
-    int changes = 0;
+    int changes = simplify_jmp_chains();
     bool changed = true;
     while (changed) {
         changed = false;
@@ -217,6 +289,32 @@ DeobfuscationResult Deobfuscator::run_sequential_block_merging() {
 
     if (changes > 0) rebuild_from_cfg();
     return {true, "Sequential Block Merging", changes, "Merged " + std::to_string(changes) + " block pair(s)"};
+}
+
+std::vector<DeobfuscationResult> Deobfuscator::run_all_passes(int max_iterations) {
+    std::vector<DeobfuscationResult> all_results;
+    for (int i = 0; i < max_iterations; ++i) {
+        int changes_this_round = 0;
+
+        auto res = run_constant_folding();
+        all_results.push_back(res);
+        changes_this_round += res.changes_made;
+
+        res = run_dead_branch_elimination();
+        all_results.push_back(res);
+        changes_this_round += res.changes_made;
+
+        res = run_sequential_block_merging();
+        all_results.push_back(res);
+        changes_this_round += res.changes_made;
+
+        res = run_dead_code_elimination();
+        all_results.push_back(res);
+        changes_this_round += res.changes_made;
+
+        if (changes_this_round == 0) break;
+    }
+    return all_results;
 }
 
 } // namespace lua_deobfuscator

@@ -24,11 +24,16 @@ public:
     DeobfuscationResult run_dead_branch_elimination();
     DeobfuscationResult run_sequential_block_merging();
 
+    std::vector<DeobfuscationResult> run_all_passes(int max_iterations = 10);
+
 private:
     std::shared_ptr<Prototype> proto;
     std::unique_ptr<CFG> cfg;
 
     void rebuild_from_cfg();
+    int simplify_jmp_chains();
+    int find_jmp_chain_target(int block_id, std::set<int>& visited);
+    bool is_jmp_only_block(int block_id);
 };
 
 } // namespace lua_deobfuscator
