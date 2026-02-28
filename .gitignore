@@ -1,2 +1,3 @@
 build_native/
 build_wasm/
+node_modules/
