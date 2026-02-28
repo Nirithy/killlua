@@ -1,6 +1,19 @@
 #include "CFG.h"
+#include "Disassembler.h"
 #include <algorithm>
 #include <sstream>
+
+static std::string escape_dot_label(const std::string& str) {
+    std::string res;
+    for (char c : str) {
+        if (c == '"') res += "\\\"";
+        else if (c == '\\') res += "\\\\";
+        else if (c == '\n') res += "\\n";
+        else if (c == '\r') res += "\\r";
+        else res += c;
+    }
+    return res;
+}
 
 namespace lua_deobfuscator {
 
@@ -230,12 +243,16 @@ std::string CFG::to_dot(bool include_instructions) {
 
         // If p is the same as this->proto, we just use this->blocks and this->edges
         // otherwise we create a new CFG for the child prototype
+        std::set<int> jump_targets = Disassembler::collect_jump_targets(p);
+
         if (p == this->proto) {
             for (auto const& [id, block] : this->blocks) {
                 ss << ind << "  F" << func_id << "_BB" << id << " [label=\"BB" << id << " [PC " << block->start_pc << "-" << (block->end_pc - 1) << "]";
                 if (include_instructions) {
                     for (size_t i = 0; i < block->instructions.size(); ++i) {
-                        ss << "\\n" << (block->start_pc + i) << ": " << block->instructions[i].opcode_name;
+                        int pc = block->start_pc + i;
+                        std::string instr_str = Disassembler::format_instruction(block->instructions[i], p, pc, 0, jump_targets);
+                        ss << "\\n" << pc << ": " << escape_dot_label(instr_str);
                     }
                 }
                 ss << "\"";
@@ -258,7 +275,9 @@ std::string CFG::to_dot(bool include_instructions) {
                 ss << ind << "  F" << func_id << "_BB" << id << " [label=\"BB" << id << " [PC " << block->start_pc << "-" << (block->end_pc - 1) << "]";
                 if (include_instructions) {
                     for (size_t i = 0; i < block->instructions.size(); ++i) {
-                        ss << "\\n" << (block->start_pc + i) << ": " << block->instructions[i].opcode_name;
+                        int pc = block->start_pc + i;
+                        std::string instr_str = Disassembler::format_instruction(block->instructions[i], p, pc, 0, jump_targets);
+                        ss << "\\n" << pc << ": " << escape_dot_label(instr_str);
                     }
                 }
                 ss << "\"";
