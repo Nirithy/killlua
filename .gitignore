@@ -1,3 +1,9 @@
 build_native/
 build_wasm/
 node_modules/
+*.py
+*.cpp
+*.o
+*_bin
+sclisp.lasm
+sclisp_deob.lasm

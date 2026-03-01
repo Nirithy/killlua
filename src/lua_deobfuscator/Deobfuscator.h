@@ -38,6 +38,8 @@ public:
     DeobfuscationResult run_dead_branch_elimination();
     DeobfuscationResult run_sequential_block_merging();
     DeobfuscationResult run_control_flow_deflattening();
+    DeobfuscationResult run_redundant_store_elimination();
+    DeobfuscationResult run_conditional_branch_normalization();
 
     std::vector<DeobfuscationResult> run_all_passes(int max_iterations = 10);
 

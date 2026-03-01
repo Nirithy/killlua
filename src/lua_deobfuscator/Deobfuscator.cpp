@@ -109,20 +109,25 @@ void Deobfuscator::perform_constant_propagation() {
             std::vector<RegValue> current = entry;
             for (const auto& instr : block->instructions) {
                 Opcode op = static_cast<Opcode>(instr.opcode);
+                if (instr.a < 0 || instr.a >= 256) continue;
                 if (op == Opcode::LOADK) {
                     current[instr.a].state = RegValue::CONSTANT;
-                    current[instr.a].val = proto->constants[instr.bx];
+                    if (instr.bx >= 0 && instr.bx < (int)proto->constants.size()) {
+                        current[instr.a].val = proto->constants[instr.bx];
+                    } else {
+                        current[instr.a].state = RegValue::UNKNOWN;
+                    }
                 } else if (op == Opcode::LOADBOOL) {
                     current[instr.a].state = RegValue::CONSTANT;
                     current[instr.a].val.type = LuaConstantType::BOOLEAN;
                     current[instr.a].val.value = (instr.b != 0);
                 } else if (op == Opcode::LOADNIL) {
-                    for (int i = instr.a; i <= instr.a + instr.b; ++i) {
+                    for (int i = instr.a; i <= instr.a + instr.b && i < 256; ++i) {
                         current[i].state = RegValue::CONSTANT;
                         current[i].val.type = LuaConstantType::NIL;
                     }
                 } else if (op == Opcode::MOVE) {
-                    current[instr.a] = current[instr.b];
+                    if (instr.b >= 0 && instr.b < 256) current[instr.a] = current[instr.b];
                 } else {
                     if (op != Opcode::EQ && op != Opcode::LT && op != Opcode::LE &&
                         op != Opcode::NEQ && op != Opcode::GE && op != Opcode::GT &&
@@ -277,10 +282,17 @@ DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
                 for (size_t i = 0; i < block->instructions.size() - 1; ++i) {
                     const auto& instr = block->instructions[i];
                     Opcode iop = static_cast<Opcode>(instr.opcode);
-                    if (iop == Opcode::LOADK) { current[instr.a].state = RegValue::CONSTANT; current[instr.a].val = proto->constants[instr.bx]; }
-                    else if (iop == Opcode::LOADBOOL) { current[instr.a].state = RegValue::CONSTANT; current[instr.a].val.type = LuaConstantType::BOOLEAN; current[instr.a].val.value = (instr.b != 0); }
-                    else if (iop == Opcode::LOADNIL) { for (int j = instr.a; j <= instr.a + instr.b; ++j) { current[j].state = RegValue::CONSTANT; current[j].val.type = LuaConstantType::NIL; } }
-                    else if (iop == Opcode::MOVE) { current[instr.a] = current[instr.b]; }
+                    if (instr.a < 0 || instr.a >= 256) continue;
+                    if (iop == Opcode::LOADK) {
+                        current[instr.a].state = RegValue::CONSTANT;
+                        if (instr.bx >= 0 && instr.bx < (int)proto->constants.size()) {
+                            current[instr.a].val = proto->constants[instr.bx];
+                        } else {
+                            current[instr.a].state = RegValue::UNKNOWN;
+                        }
+                    } else if (iop == Opcode::LOADBOOL) { current[instr.a].state = RegValue::CONSTANT; current[instr.a].val.type = LuaConstantType::BOOLEAN; current[instr.a].val.value = (instr.b != 0); }
+                    else if (iop == Opcode::LOADNIL) { for (int j = instr.a; j <= instr.a + instr.b && j < 256; ++j) { current[j].state = RegValue::CONSTANT; current[j].val.type = LuaConstantType::NIL; } }
+                    else if (iop == Opcode::MOVE) { if (instr.b >= 0 && instr.b < 256) current[instr.a] = current[instr.b]; }
                     else if (iop != Opcode::EQ && iop != Opcode::LT && iop != Opcode::LE && iop != Opcode::NEQ && iop != Opcode::GE && iop != Opcode::GT && iop != Opcode::TEST && iop != Opcode::TESTSET && iop != Opcode::JMP && iop != Opcode::FORLOOP && iop != Opcode::TFORLOOP && iop != Opcode::SETTABLE && iop != Opcode::SETTABUP && iop != Opcode::SETUPVAL) {
                         current[instr.a].state = RegValue::MULTIPLE;
                     }
@@ -291,7 +303,7 @@ DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
                         int idx = INDEXK(reg_or_k);
                         if (idx >= 0 && idx < (int)proto->constants.size()) return {true, proto->constants[idx]};
                     } else {
-                        if (reg_or_k >= 0 && reg_or_k < 256 && current[reg_or_k].state == RegValue::CONSTANT) return {true, current[reg_or_k].val};
+                        if (reg_or_k >= 0 && reg_or_k < 256 && current.size() > reg_or_k && current[reg_or_k].state == RegValue::CONSTANT) return {true, current[reg_or_k].val};
                     }
                     return {false, {}};
                 };
@@ -498,7 +510,7 @@ DeobfuscationResult Deobfuscator::run_control_flow_deflattening() {
                             int idx = INDEXK(reg_or_k);
                             if (idx >= 0 && idx < (int)proto->constants.size()) return {true, proto->constants[idx]};
                         } else {
-                            if (reg_or_k >= 0 && reg_or_k < 256 && exit_regs[reg_or_k].state == RegValue::CONSTANT) return {true, exit_regs[reg_or_k].val};
+                            if (reg_or_k >= 0 && reg_or_k < 256 && exit_regs.size() > reg_or_k && exit_regs[reg_or_k].state == RegValue::CONSTANT) return {true, exit_regs[reg_or_k].val};
                         }
                         return {false, {}};
                     };
@@ -576,6 +588,114 @@ DeobfuscationResult Deobfuscator::run_control_flow_deflattening() {
 
     if (changes > 0) rebuild_from_cfg();
     return {true, "Control Flow Deflattening", changes, "Deflattened " + std::to_string(changes) + " branches."};
+}
+
+DeobfuscationResult Deobfuscator::run_redundant_store_elimination() {
+    if (!cfg) cfg = std::make_unique<CFG>(proto);
+    int changes = 0;
+
+    for (auto& [id, block] : cfg->blocks) {
+        if (block->instructions.empty()) continue;
+
+        std::vector<bool> used_later(256, true);
+        for (int i = block->instructions.size() - 1; i >= 0; --i) {
+            auto& instr = block->instructions[i];
+            Opcode op = static_cast<Opcode>(instr.opcode);
+
+            bool is_redundant = false;
+            if (instr.a >= 0 && instr.a < 256 && (op == Opcode::LOADK || op == Opcode::LOADKX || op == Opcode::LOADBOOL)) {
+                if (!used_later[instr.a]) {
+                    is_redundant = true;
+                }
+            }
+
+            if (is_redundant) {
+                // Remove instruction
+                block->instructions.erase(block->instructions.begin() + i);
+                changes++;
+                continue;
+            }
+
+            // Mark reads as used
+            auto mode = get_opcode_mode(static_cast<int>(op));
+            if (op == Opcode::MOVE && instr.b >= 0 && instr.b < 256) used_later[instr.b] = true;
+            if (mode == OpMode::iABC) {
+                if (op != Opcode::LOADK && op != Opcode::LOADKX && op != Opcode::LOADBOOL && op != Opcode::MOVE && op != Opcode::LOADNIL && op != Opcode::GETUPVAL && op != Opcode::GETTABUP && op != Opcode::GETTABLE && op != Opcode::NEWTABLE && op != Opcode::SELF) {
+                    if (instr.a >= 0 && instr.a < 256) used_later[instr.a] = true;
+                }
+                if (instr.b >= 0 && instr.b < 256 && !ISK(instr.b)) used_later[instr.b] = true;
+                if (instr.c >= 0 && instr.c < 256 && !ISK(instr.c)) used_later[instr.c] = true;
+            } else if (mode == OpMode::iABx || mode == OpMode::iAsBx) {
+                if (op == Opcode::TEST || op == Opcode::TESTSET || op == Opcode::TFORCALL || op == Opcode::TFORLOOP) {
+                    if (instr.a >= 0 && instr.a < 256) used_later[instr.a] = true;
+                }
+            }
+
+            // Mark writes as overwritten
+            if (op == Opcode::LOADK || op == Opcode::LOADKX || op == Opcode::LOADBOOL || op == Opcode::MOVE || op == Opcode::GETUPVAL || op == Opcode::GETTABUP || op == Opcode::GETTABLE || op == Opcode::NEWTABLE) {
+                if (instr.a >= 0 && instr.a < 256) used_later[instr.a] = false;
+            }
+        }
+    }
+
+    if (changes > 0) rebuild_from_cfg();
+    return {true, "Redundant Store Elimination", changes, "Eliminated " + std::to_string(changes) + " redundant stores"};
+}
+
+DeobfuscationResult Deobfuscator::run_conditional_branch_normalization() {
+    if (!cfg) cfg = std::make_unique<CFG>(proto);
+    int changes = 0;
+
+    std::set<Opcode> conditional_ops = {Opcode::EQ, Opcode::LT, Opcode::LE, Opcode::NEQ, Opcode::GE, Opcode::GT, Opcode::TEST, Opcode::TESTSET};
+
+    // First: Normalize branches where TRUE and FALSE paths converge to the EXACT same block immediately.
+    for (auto& [id, block] : cfg->blocks) {
+        if (block->instructions.empty()) continue;
+        auto& last_instr = block->instructions.back();
+        Opcode op = static_cast<Opcode>(last_instr.opcode);
+
+        if (conditional_ops.count(op) && block->successors.size() == 2) {
+            std::vector<int> succs(block->successors.begin(), block->successors.end());
+            int s1 = succs[0];
+            int s2 = succs[1];
+
+            std::set<int> visited;
+            int target1 = find_jmp_chain_target(s1, visited);
+            visited.clear();
+            int target2 = find_jmp_chain_target(s2, visited);
+
+            if (target1 == target2 && target1 != -1) {
+                if (op == Opcode::TESTSET) {
+                    last_instr = Instruction::encode_new(static_cast<int>(Opcode::MOVE), last_instr.a, last_instr.b);
+                } else {
+                    block->instructions.pop_back();
+                }
+
+                // Keep only one successor, effectively making it sequential to the target or jump
+                // Usually the next block in PC is a JMP to target, or simply the target.
+                // We'll rewrite the edges: point id directly to target1 as a JUMP.
+                block->successors.erase(s1);
+                block->successors.erase(s2);
+                cfg->blocks[s1]->predecessors.erase(id);
+                cfg->blocks[s2]->predecessors.erase(id);
+                cfg->edges.erase({id, s1});
+                cfg->edges.erase({id, s2});
+
+                block->successors.insert(target1);
+                cfg->blocks[target1]->predecessors.insert(id);
+                cfg->edges[{id, target1}] = EdgeType::JUMP;
+
+                // Add an explicit JMP instruction to maintain correct output
+                int diff = 0; // The rebuild_code method recalculates JMP offsets based on block IDs
+                block->instructions.push_back(Instruction::encode_new(static_cast<int>(Opcode::JMP), 0, 0, 0, diff, 0));
+
+                changes++;
+            }
+        }
+    }
+
+    if (changes > 0) rebuild_from_cfg();
+    return {true, "Conditional Branch Normalization", changes, "Normalized " + std::to_string(changes) + " conditional branch(es)"};
 }
 
 std::vector<DeobfuscationResult> Deobfuscator::run_all_passes(int max_iterations) {
