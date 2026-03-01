@@ -310,6 +310,33 @@
             font-weight: bold;
             color: var(--text-bright);
         }
+
+        /* Mobile/Android UI compatibility */
+        @media (max-width: 768px) {
+            body {
+                flex-direction: column;
+                height: auto;
+                overflow: auto;
+            }
+
+            .sidebar {
+                width: 100%;
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+            }
+
+            .tabs {
+                flex-wrap: wrap;
+            }
+
+            .diff-container {
+                flex-direction: column;
+            }
+
+            .diff-panel {
+                min-height: 300px;
+            }
+        }
     </style>
 </head>
 <body>
@@ -6808,14 +6835,17 @@ run();
             dlBtn.innerText = '下载';
             dlBtn.onclick = () => {
                 const blob = type === 'luac' ? new Blob([data], {type: 'application/octet-stream'}) : new Blob([data], {type: 'text/plain'});
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = name;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                const reader = new FileReader();
+                reader.onloadend = () => {
+                    const url = reader.result;
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = name;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                };
+                reader.readAsDataURL(blob);
             };
 
             actions.appendChild(dlBtn);
