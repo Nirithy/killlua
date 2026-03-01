@@ -1,0 +1,109 @@
+--- web/index.html
++++ web/index.html
+@@ -481,14 +481,27 @@
+             } catch (err) {
+                 document.getElementById('asmStatus').innerText = '运行错误: ' + err.message;
+                 document.getElementById('asmStatus').style.color = '#f44336';
+             }
+         };
+
++        let deobfuscateTimeout = null;
++        function scheduleUpdateDeobfuscation() {
++            if (deobfuscateTimeout) clearTimeout(deobfuscateTimeout);
++            deobfuscateTimeout = setTimeout(updateDeobfuscation, 300);
++        }
++
++        let pendingDot = null;
+         async function updateDeobfuscation() {
+             if (!currentBytecode || !LuaDeob) return;
+
+             try {
++                // Save current scroll position to restore it after update
++                const optDisasm = document.getElementById('optimizedDisasm');
++                const savedScrollTop = optDisasm.scrollTop;
++                const savedScrollLeft = optDisasm.scrollLeft;
++
+                 const startTime = performance.now();
+                 document.getElementById('status').innerText = '正在处理...';
+                 document.getElementById('status').style.color = '#cccccc';
+
+                 const fold = document.getElementById('foldCheck').checked;
+@@ -504,13 +517,20 @@
+                 document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
+
+                 if (result.success) {
+                     document.getElementById('optimizedDisasm').innerText = result.disassembly;
+                     document.getElementById('cfgDotOutput').innerText = result.dot;
+-                    renderCFG(result.dot);
++                    pendingDot = result.dot;
++
++                    // Only render CFG immediately if the CFG tab is active
++                    if (document.querySelector('.tab[data-tab="cfg"]').classList.contains('active')) {
++                        renderCFG(pendingDot);
++                        pendingDot = null;
++                    }
++
++                    // Restore scroll position
++                    optDisasm.scrollTop = savedScrollTop;
++                    optDisasm.scrollLeft = savedScrollLeft;
++
+                     document.getElementById('status').innerText = '处理完成';
+                     document.getElementById('status').style.color = '#4caf50';
+
+@@ -528,7 +548,7 @@
+
+         // Add real-time update listeners
+         ['foldCheck', 'dbeCheck', 'sbmCheck', 'dceCheck', 'deflattenCheck', 'rseCheck', 'normCheck'].forEach(id => {
+-            document.getElementById(id).onchange = updateDeobfuscation;
++            document.getElementById(id).onchange = scheduleUpdateDeobfuscation;
+         });
+
+         document.getElementById('fileInput').onchange = async (e) => {
+@@ -668,7 +688,29 @@
+         }
+
+         window.onload = initWasm;
++
++        // Setup Synchronized Scrolling for Comparison
++        const origDisasm = document.getElementById('originalDisasm');
++        const optDisasm = document.getElementById('optimizedDisasm');
++
++        let isSyncingLeftScroll = false;
++        let isSyncingRightScroll = false;
++
++        origDisasm.addEventListener('scroll', function(e) {
++            if (!isSyncingLeftScroll) {
++                isSyncingRightScroll = true;
++                optDisasm.scrollTop = this.scrollTop;
++                optDisasm.scrollLeft = this.scrollLeft;
++            }
++            isSyncingLeftScroll = false;
++        });
++
++        optDisasm.addEventListener('scroll', function(e) {
++            if (!isSyncingRightScroll) {
++                isSyncingLeftScroll = true;
++                origDisasm.scrollTop = this.scrollTop;
++                origDisasm.scrollLeft = this.scrollLeft;
++            }
++            isSyncingRightScroll = false;
++        });
++
++        // Handle tab switching to lazy-load CFG
++        document.querySelectorAll('.tab').forEach(tab => {
++            tab.onclick = () => {
++                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
++                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
++
++                tab.classList.add('active');
++                document.getElementById(tab.dataset.tab).classList.add('active');
++
++                if (tab.dataset.tab === 'cfg' && pendingDot) {
++                    renderCFG(pendingDot);
++                    pendingDot = null;
++                }
++            };
++        });
+     </script>
+ </body>
+ </html>

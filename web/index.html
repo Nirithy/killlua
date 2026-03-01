@@ -442,7 +442,40 @@
 
                 tab.classList.add('active');
                 document.getElementById(tab.dataset.tab).classList.add('active');
+
+                // Lazy load CFG if pending
+                if (tab.dataset.tab === 'cfg' && pendingDot) {
+                    renderCFG(pendingDot);
+                    pendingDot = null;
+                }
             };
+        });
+
+        // Setup Synchronized Scrolling for Comparison
+        document.addEventListener('DOMContentLoaded', () => {
+            const origDisasm = document.getElementById('originalDisasm');
+            const optDisasm = document.getElementById('optimizedDisasm');
+
+            let isSyncingLeftScroll = false;
+            let isSyncingRightScroll = false;
+
+            origDisasm.addEventListener('scroll', function(e) {
+                if (!isSyncingLeftScroll) {
+                    isSyncingRightScroll = true;
+                    optDisasm.scrollTop = this.scrollTop;
+                    optDisasm.scrollLeft = this.scrollLeft;
+                }
+                isSyncingLeftScroll = false;
+            });
+
+            optDisasm.addEventListener('scroll', function(e) {
+                if (!isSyncingRightScroll) {
+                    isSyncingLeftScroll = true;
+                    origDisasm.scrollTop = this.scrollTop;
+                    origDisasm.scrollLeft = this.scrollLeft;
+                }
+                isSyncingRightScroll = false;
+            });
         });
 
         async function initWasm() {
@@ -532,10 +565,22 @@
             }
         };
 
+        let deobfuscateTimeout = null;
+        function scheduleUpdateDeobfuscation() {
+            if (deobfuscateTimeout) clearTimeout(deobfuscateTimeout);
+            deobfuscateTimeout = setTimeout(updateDeobfuscation, 300);
+        }
+
+        let pendingDot = null;
         async function updateDeobfuscation() {
             if (!currentBytecode || !LuaDeob) return;
 
             try {
+                // Save current scroll position to restore it after update
+                const optDisasm = document.getElementById('optimizedDisasm');
+                const savedScrollTop = optDisasm.scrollTop;
+                const savedScrollLeft = optDisasm.scrollLeft;
+
                 const startTime = performance.now();
                 document.getElementById('status').innerText = '正在处理...';
                 document.getElementById('status').style.color = '#cccccc';
@@ -556,7 +601,18 @@
                 if (result.success) {
                     document.getElementById('optimizedDisasm').innerText = result.disassembly;
                     document.getElementById('cfgDotOutput').innerText = result.dot;
-                    renderCFG(result.dot);
+                    pendingDot = result.dot;
+
+                    // Only render CFG immediately if the CFG tab is active
+                    if (document.querySelector('.tab[data-tab="cfg"]').classList.contains('active')) {
+                        renderCFG(pendingDot);
+                        pendingDot = null;
+                    }
+
+                    // Restore scroll position
+                    optDisasm.scrollTop = savedScrollTop;
+                    optDisasm.scrollLeft = savedScrollLeft;
+
                     document.getElementById('status').innerText = '处理完成';
                     document.getElementById('status').style.color = '#4caf50';
 
@@ -575,7 +631,7 @@
 
         // Add real-time update listeners
         ['foldCheck', 'dbeCheck', 'sbmCheck', 'dceCheck', 'deflattenCheck', 'rseCheck', 'normCheck'].forEach(id => {
-            document.getElementById(id).onchange = updateDeobfuscation;
+            document.getElementById(id).onchange = scheduleUpdateDeobfuscation;
         });
 
         document.getElementById('fileInput').onchange = async (e) => {
