@@ -339,6 +339,12 @@
                 <label class="checkbox-item">
                     <input type="checkbox" id="deflattenCheck" checked> 反扁平化 (Deflatten)
                 </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="rseCheck" checked> 优化无用垃圾指令 (RSE)
+                </label>
+                <label class="checkbox-item">
+                    <input type="checkbox" id="normCheck" checked> 条件判断归一化 (Normalize)
+                </label>
             </div>
         </div>
 
@@ -539,8 +545,10 @@
                 const sbm = document.getElementById('sbmCheck').checked;
                 const dce = document.getElementById('dceCheck').checked;
                 const deflatten = document.getElementById('deflattenCheck').checked;
+                const rse = document.getElementById('rseCheck').checked;
+                const norm = document.getElementById('normCheck').checked;
 
-                const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce, deflatten);
+                const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);
 
                 const endTime = performance.now();
                 document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
@@ -566,7 +574,7 @@
         }
 
         // Add real-time update listeners
-        ['foldCheck', 'dbeCheck', 'sbmCheck', 'dceCheck', 'deflattenCheck'].forEach(id => {
+        ['foldCheck', 'dbeCheck', 'sbmCheck', 'dceCheck', 'deflattenCheck', 'rseCheck', 'normCheck'].forEach(id => {
             document.getElementById(id).onchange = updateDeobfuscation;
         });
 
@@ -586,7 +594,7 @@
 
                 // Get baseline disassembly
                 try {
-                    const result = LuaDeob.deobfuscate(currentBytecode, false, false, false, false, false);
+                    const result = LuaDeob.deobfuscate(currentBytecode, false, false, false, false, false, false, false);
                     if (result.success) {
                         document.getElementById('originalDisasm').innerText = result.disassembly;
                         updateDeobfuscation();
@@ -611,8 +619,10 @@
             const sbm = document.getElementById('sbmCheck').checked;
             const dce = document.getElementById('dceCheck').checked;
             const deflatten = document.getElementById('deflattenCheck').checked;
+            const rse = document.getElementById('rseCheck').checked;
+            const norm = document.getElementById('normCheck').checked;
 
-            const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce, deflatten);
+            const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);
             if (result.success) {
                 const baseName = currentFileName.replace(/\.[^/.]+$/, "");
                 addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');

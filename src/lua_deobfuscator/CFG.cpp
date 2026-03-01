@@ -42,6 +42,11 @@ std::set<int> CFG::find_leaders() {
             if (target >= 0 && target < n) leaders.insert(target);
         }
 
+        if (op == Opcode::TAILCALL && proto->code[pc].a == 0 && proto->code[pc].b >= 255) {
+            int target = pc + proto->code[pc].sbx + 1;
+            if (target >= 0 && target < n) leaders.insert(target);
+        }
+
         if (op == Opcode::EQ || op == Opcode::LT || op == Opcode::LE || op == Opcode::NEQ ||
             op == Opcode::GE || op == Opcode::GT || op == Opcode::TEST || op == Opcode::TESTSET) {
             if (pc + 1 < n) leaders.insert(pc + 1);
@@ -58,7 +63,7 @@ std::set<int> CFG::find_leaders() {
             if (pc + 2 < n) leaders.insert(pc + 2);
         }
 
-        if (op == Opcode::JMP || op == Opcode::RETURN || op == Opcode::TAILCALL || op == Opcode::FORLOOP || op == Opcode::FORPREP || op == Opcode::TFORLOOP) {
+        if (op == Opcode::JMP || op == Opcode::RETURN || (op == Opcode::TAILCALL && !(proto->code[pc].a == 0 && proto->code[pc].b >= 255)) || op == Opcode::FORLOOP || op == Opcode::FORPREP || op == Opcode::TFORLOOP) {
             if (pc + 1 < n) leaders.insert(pc + 1);
         }
     }
@@ -92,6 +97,8 @@ void CFG::create_edges() {
 
         if (op == Opcode::JMP) {
             add_edge(id, last_pc + instr.sbx + 1, EdgeType::JUMP);
+        } else if (op == Opcode::TAILCALL && instr.a == 0 && instr.b >= 255) {
+            add_edge(id, last_pc + instr.sbx + 1, EdgeType::JUMP);
         } else if (op == Opcode::EQ || op == Opcode::LT || op == Opcode::LE || op == Opcode::NEQ || op == Opcode::GE || op == Opcode::GT || op == Opcode::TEST || op == Opcode::TESTSET) {
             int next_pc = last_pc + 1;
             int skip_pc = last_pc + 2;
@@ -116,7 +123,7 @@ void CFG::create_edges() {
             if (last_pc + 2 < (int)proto->code.size()) add_edge(id, last_pc + 2, EdgeType::JUMP);
         } else if ((op == Opcode::SETLIST && instr.c == 0) || op == Opcode::LOADKX) {
             if (last_pc + 2 < (int)proto->code.size()) add_edge(id, last_pc + 2, EdgeType::SEQUENTIAL);
-        } else if (op == Opcode::RETURN || op == Opcode::TAILCALL) {
+        } else if (op == Opcode::RETURN || (op == Opcode::TAILCALL && !(instr.a == 0 && instr.b >= 255))) {
             // No exit edges
         } else {
             if (last_pc + 1 < (int)proto->code.size()) add_edge(id, last_pc + 1, EdgeType::SEQUENTIAL);
@@ -138,8 +145,9 @@ void CFG::mark_special_blocks() {
     for (auto const& [id, block] : blocks) {
         if (block->successors.empty()) block->is_exit = true;
         else if (!block->instructions.empty()) {
-            Opcode op = static_cast<Opcode>(block->instructions.back().opcode);
-            if (op == Opcode::RETURN || op == Opcode::TAILCALL) block->is_exit = true;
+            auto& last_instr = block->instructions.back();
+            Opcode op = static_cast<Opcode>(last_instr.opcode);
+            if (op == Opcode::RETURN || (op == Opcode::TAILCALL && !(last_instr.a == 0 && last_instr.b >= 255))) block->is_exit = true;
         }
     }
 }
@@ -189,7 +197,7 @@ std::vector<Instruction> CFG::rebuild_code() {
             Opcode op = static_cast<Opcode>(instr.opcode);
             int pc = block_new_start[id] + i;
 
-            if (op == Opcode::JMP || op == Opcode::FORLOOP || op == Opcode::FORPREP || op == Opcode::TFORLOOP) {
+            if (op == Opcode::JMP || op == Opcode::FORLOOP || op == Opcode::FORPREP || op == Opcode::TFORLOOP || (op == Opcode::TAILCALL && instr.a == 0 && instr.b >= 255)) {
                 // Find target block from edges
                 int target_id = -1;
                 for (auto const& [edge, type] : edges) {
