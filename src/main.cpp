@@ -120,10 +120,77 @@ int main(int argc, char** argv) {
 
 using namespace emscripten;
 
+std::string escape_json_string(const std::string& input) {
+    std::string output;
+    for (char c : input) {
+        if (c == '"') output += "\\\"";
+        else if (c == '\\') output += "\\\\";
+        else if (c == '\b') output += "\\b";
+        else if (c == '\f') output += "\\f";
+        else if (c == '\n') output += "\\n";
+        else if (c == '\r') output += "\\r";
+        else if (c == '\t') output += "\\t";
+        else output += c;
+    }
+    return output;
+}
+
+std::string build_structure(std::shared_ptr<lua_deobfuscator::Prototype> proto) {
+    std::stringstream ss;
+    ss << "{";
+    ss << "\"source\": \"" << escape_json_string(proto->source) << "\",";
+    ss << "\"line_defined\": " << proto->line_defined << ",";
+    ss << "\"last_line_defined\": " << proto->last_line_defined << ",";
+    ss << "\"num_params\": " << proto->num_params << ",";
+    ss << "\"is_vararg\": " << proto->is_vararg << ",";
+    ss << "\"max_stack_size\": " << proto->max_stack_size << ",";
+    ss << "\"num_instructions\": " << proto->code.size() << ",";
+
+    ss << "\"constants\": [";
+    for (size_t i = 0; i < proto->constants.size(); ++i) {
+        ss << "\"" << escape_json_string(lua_deobfuscator::Disassembler::format_constant(proto->constants[i])) << "\"";
+        if (i < proto->constants.size() - 1) ss << ",";
+    }
+    ss << "],";
+
+    ss << "\"upvalues\": [";
+    for (size_t i = 0; i < proto->upvalues.size(); ++i) {
+        ss << "{";
+        ss << "\"name\": \"" << escape_json_string(proto->upvalues[i].name) << "\",";
+        ss << "\"instack\": " << (proto->upvalues[i].instack ? "true" : "false") << ",";
+        ss << "\"idx\": " << proto->upvalues[i].idx;
+        ss << "}";
+        if (i < proto->upvalues.size() - 1) ss << ",";
+    }
+    ss << "],";
+
+    ss << "\"locvars\": [";
+    for (size_t i = 0; i < proto->locvars.size(); ++i) {
+        ss << "{";
+        ss << "\"varname\": \"" << escape_json_string(proto->locvars[i].varname) << "\",";
+        ss << "\"startpc\": " << proto->locvars[i].startpc << ",";
+        ss << "\"endpc\": " << proto->locvars[i].endpc;
+        ss << "}";
+        if (i < proto->locvars.size() - 1) ss << ",";
+    }
+    ss << "],";
+
+    ss << "\"protos\": [";
+    for (size_t i = 0; i < proto->protos.size(); ++i) {
+        ss << build_structure(proto->protos[i]);
+        if (i < proto->protos.size() - 1) ss << ",";
+    }
+    ss << "]";
+
+    ss << "}";
+    return ss.str();
+}
+
 struct DeobResultJS {
     bool success;
     std::string disassembly;
     std::string dot;
+    std::string structure;
     emscripten::val bytecode;
     std::string error;
 };
@@ -147,9 +214,11 @@ DeobResultJS deobfuscate_wasm(emscripten::val input, bool fold, bool dbe, bool s
         auto serialized = Serializer::serialize(chunk);
         emscripten::val bytecode = emscripten::val::global("Uint8Array").new_(emscripten::typed_memory_view(serialized.size(), serialized.data()));
 
-        return {true, disasm.disassemble(), cfg.to_dot(), bytecode, ""};
+        std::string structure_json = build_structure(chunk.main);
+
+        return {true, disasm.disassemble(), cfg.to_dot(), structure_json, bytecode, ""};
     } catch (const std::exception& e) {
-        return {false, "", "", emscripten::val::null(), e.what()};
+        return {false, "", "", "", emscripten::val::null(), e.what()};
     }
 }
 
@@ -158,9 +227,9 @@ DeobResultJS assemble_wasm(std::string lasm) {
         LuaChunk chunk = Assembler::assemble(lasm);
         auto serialized = Serializer::serialize(chunk);
         emscripten::val bytecode = emscripten::val::global("Uint8Array").new_(emscripten::typed_memory_view(serialized.size(), serialized.data()));
-        return {true, "", "", bytecode, ""};
+        return {true, "", "", "", bytecode, ""};
     } catch (const std::exception& e) {
-        return {false, "", "", emscripten::val::null(), e.what()};
+        return {false, "", "", "", emscripten::val::null(), e.what()};
     }
 }
 
@@ -169,6 +238,7 @@ EMSCRIPTEN_BINDINGS(lua_deobfuscator) {
         .field("success", &DeobResultJS::success)
         .field("disassembly", &DeobResultJS::disassembly)
         .field("dot", &DeobResultJS::dot)
+        .field("structure", &DeobResultJS::structure)
         .field("bytecode", &DeobResultJS::bytecode)
         .field("error", &DeobResultJS::error);
 

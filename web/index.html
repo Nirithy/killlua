@@ -427,7 +427,7 @@
                     <input type="checkbox" id="dceCheck"> 死代码消除 (Dead Code)
                 </label>
                 <label class="checkbox-item">
-                    <input type="checkbox" id="deflattenCheck" checked> 反扁平化 (Deflatten)
+                    <input type="checkbox" id="deflattenCheck"> 反扁平化 (Deflatten)
                 </label>
                 <label class="checkbox-item">
                     <input type="checkbox" id="rseCheck"> 优化无用垃圾指令 (RSE)
@@ -456,6 +456,7 @@
             <div class="tab" data-tab="cfg">控制流图 (CFG)</div>
             <div class="tab" data-tab="cfg-dot">CFG DOT 源码</div>
             <div class="tab" data-tab="asm">汇编处理</div>
+            <div class="tab" data-tab="structure">函数结构</div>
             <div class="tab" data-tab="info">文件详情</div>
         </div>
 
@@ -493,6 +494,12 @@
                 <button id="assembleBtn" style="padding: 10px 20px; background: var(--accent-color); color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer;">开始汇编</button>
             </div>
             <div id="asmStatus" style="margin-top: 10px; font-size: 0.9rem;"></div>
+        </div>
+
+        <div id="structure" class="tab-content" style="padding: 20px; overflow-y: auto;">
+            <div id="structure-container" style="background: var(--code-bg); color: #d4d4d4; padding: 15px; border-radius: 4px; border: 1px solid var(--border-color); font-family: monospace; white-space: pre;">
+                <!-- Structure will be displayed here -->
+            </div>
         </div>
 
         <div id="info" class="tab-content">
@@ -657,6 +664,12 @@
                     document.getElementById('asmStatus').innerText = '汇编成功';
                     document.getElementById('asmStatus').style.color = '#4caf50';
                     addProcessItem("assembled_" + Date.now() + ".luac", result.bytecode, 'luac');
+
+                    // Immediately load the newly assembled bytecode as the currentBytecode
+                    currentBytecode = result.bytecode;
+
+                    // Trigger the deobfuscation logic to refresh all views (Disassembly, CFG, Structure)
+                    updateDeobfuscation();
                 } else {
                     document.getElementById('asmStatus').innerText = '汇编失败: ' + result.error;
                     document.getElementById('asmStatus').style.color = '#f44336';
@@ -703,6 +716,12 @@
                 if (result.success) {
                     document.getElementById('optimizedDisasm').innerText = result.disassembly;
                     document.getElementById('cfgDotOutput').innerText = result.dot;
+                    try {
+                        const structObj = JSON.parse(result.structure);
+                        document.getElementById('structure-container').innerText = JSON.stringify(structObj, null, 2);
+                    } catch(e) {
+                        document.getElementById('structure-container').innerText = '结构解析错误: ' + e.message;
+                    }
                     pendingDot = result.dot;
 
                     // Only render CFG immediately if the CFG tab is active
