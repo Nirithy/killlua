@@ -1,0 +1,31 @@
+; 0 upvalues, 2 locals, 3 constants, 1 funcs
+.source "test.lua"
+.linedefined 0
+.lastlinedefined 0
+.numparams 0
+.is_vararg 1
+.maxstacksize 3
+
+.local v0 "foo"
+.local v1 "print"
+:goto_0
+	CLOSURE v0 F1
+	LOADK v1 K1
+	MOVE v2 v0
+	LOADK v3 K2
+	CALL v1 v2 v2
+	RETURN v0
+
+.func F1 ; 0 upvalues, 1 locals, 1 constants, 0 funcs
+.source "test.lua"
+.linedefined 1
+.lastlinedefined 1
+.numparams 1
+.is_vararg 0
+.maxstacksize 2
+
+.local v0 "x"
+:goto_0
+	ADD v1 v0 K0
+	RETURN v1
+.end ; F1

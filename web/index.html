@@ -483,6 +483,9 @@
             </div>
 
             <div id="cfg-controls" style="padding: 10px; background: var(--sidebar-bg); border-top: 1px solid var(--border-color); display: flex; gap: 10px; align-items: center;">
+                <select id="cfgFunctionSelector" style="padding: 6px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--panel-bg); color: var(--text-color);">
+                    <option value="-1">所有函数 (All)</option>
+                </select>
                 <button class="btn-mini" id="cfgSaveImgBtn" style="padding: 8px 15px;">保存当前流程图</button>
                 <button class="btn-mini" id="cfgApplyChangesBtn" style="padding: 8px 15px;">保存流程图的改动</button>
                 <button class="btn-mini" id="cfgToAsmBtn" style="padding: 8px 15px; background: #e67e22;">将流程图的改动转换为LASM</button>
@@ -510,7 +513,7 @@
         </div>
 
         <div id="structure" class="tab-content" style="padding: 20px; overflow-y: auto;">
-            <div id="structure-container" style="background: var(--code-bg); color: #d4d4d4; padding: 15px; border-radius: 4px; border: 1px solid var(--border-color); font-family: monospace; white-space: pre;">
+            <div id="structure-container" style="background: var(--code-bg); color: #d4d4d4; padding: 15px; border-radius: 4px; border: 1px solid var(--border-color); font-family: monospace;">
                 <!-- Structure will be displayed here -->
             </div>
         </div>
@@ -835,10 +838,23 @@
 
                 // Lazy load CFG if pending
                 if (tab.dataset.tab === 'cfg' && pendingDot) {
-                    renderCFG(pendingDot);
+                    const selectedFunc = document.getElementById('cfgFunctionSelector').value;
+                    renderCFG(extractDotForFunction(pendingDot, selectedFunc));
                     pendingDot = null;
                 }
             };
+        });
+
+        // Add event listener to function selector for CFG
+        document.addEventListener('DOMContentLoaded', () => {
+            const selector = document.getElementById('cfgFunctionSelector');
+            if (selector) {
+                selector.addEventListener('change', (e) => {
+                    if (window.lastDot) {
+                        renderCFG(extractDotForFunction(window.lastDot, e.target.value));
+                    }
+                });
+            }
         });
 
         // Setup Synchronized Scrolling for Comparison
@@ -1022,6 +1038,98 @@
             }
         };
 
+        window.jumpToDisasm = function(funcIdStr) {
+            document.querySelector('.tab[data-tab="disasm"]').click();
+            const optDisasm = document.getElementById('optimizedDisasm');
+            const text = optDisasm.innerText;
+            const idNum = parseInt(funcIdStr.substring(1));
+            let searchStr = '; ';
+            if (idNum > 0) {
+                searchStr = '.func F' + (idNum - 1);
+            }
+            const idx = text.indexOf(searchStr);
+            if (idx !== -1) {
+                const linesBefore = text.substring(0, idx).split('\n').length;
+                optDisasm.scrollTop = Math.max(0, (linesBefore - 2) * 21); // ~21px line height
+            }
+        };
+
+        function extractDotForFunction(dotStr, functionId) {
+            if (functionId === "-1" || functionId === -1) return dotStr;
+            const prefix = `F${functionId}_BB`;
+            const lines = dotStr.split('\n');
+            let out = ['digraph CFG {', '  node [shape=box];'];
+            for (let line of lines) {
+                line = line.trim();
+                if (line.startsWith(prefix)) out.push('  ' + line);
+            }
+            out.push('}');
+            return out.join('\n');
+        }
+
+        function renderStructureTree(structObj, container) {
+            let html = '';
+            let optionsHtml = '<option value="-1">所有函数 (All)</option>';
+            let funcIndex = 0;
+
+            function recurse(node, level) {
+                const currentFuncId = funcIndex++;
+                const isMain = currentFuncId === 0;
+                const funcName = isMain ? 'Main' : `F${currentFuncId}`;
+
+                optionsHtml += `<option value="${currentFuncId}">${funcName}</option>`;
+
+                html += `<div style="margin-left: ${level * 20}px; border-left: 1px solid var(--border-color); padding-left: 10px; margin-bottom: 10px;">`;
+                html += `<h4 style="margin: 0 0 5px 0; color: var(--text-bright); display: flex; align-items: center; gap: 10px;">
+                            Function ${funcName}
+                            <button class="btn-mini" onclick="jumpToDisasm('F${currentFuncId}')" style="font-size: 0.7rem; padding: 2px 5px;">在反汇编中查看</button>
+                         </h4>`;
+                html += `<ul style="list-style-type: none; padding: 0; margin: 0 0 10px 0; font-size: 0.9rem; color: #a0a0a0;">`;
+                html += `<li>line_defined: <span style="color: #b5cea8;">${node.line_defined}</span></li>`;
+                html += `<li>num_params: <span style="color: #b5cea8;">${node.num_params}</span></li>`;
+                html += `<li>max_stack_size: <span style="color: #b5cea8;">${node.max_stack_size}</span></li>`;
+                html += `<li>num_instructions: <span style="color: #b5cea8;">${node.num_instructions || 0}</span></li>`;
+                html += `</ul>`;
+
+                if (node.upvalues && node.upvalues.length > 0) {
+                    html += `<div style="font-size: 0.85rem; margin-bottom: 5px;"><strong style="color: var(--text-color);">Upvalues (${node.upvalues.length}):</strong> `;
+                    html += node.upvalues.map(u => `<span style="color: #9cdcfe;">${u.name}</span>`).join(', ') + `</div>`;
+                }
+                if (node.locvars && node.locvars.length > 0) {
+                    html += `<div style="font-size: 0.85rem; margin-bottom: 5px;"><strong style="color: var(--text-color);">Locals (${node.locvars.length}):</strong> `;
+                    html += node.locvars.map(l => `<span style="color: #9cdcfe;">${l.varname}</span>`).join(', ') + `</div>`;
+                }
+                if (node.constants && node.constants.length > 0) {
+                    html += `<div style="font-size: 0.85rem; margin-bottom: 10px;"><strong style="color: var(--text-color);">Constants (${node.constants.length}):</strong> `;
+                    html += node.constants.map(c => `<span style="color: #ce9178;">${c}</span>`).join(', ') + `</div>`;
+                }
+
+                if (node.protos && node.protos.length > 0) {
+                    for (let i = 0; i < node.protos.length; i++) {
+                        recurse(node.protos[i], level + 1);
+                    }
+                }
+                html += `</div>`;
+            }
+
+            if (structObj) {
+                recurse(structObj, 0);
+            } else {
+                html = '<div style="color: red;">结构解析失败</div>';
+            }
+
+            container.innerHTML = html;
+            const selector = document.getElementById('cfgFunctionSelector');
+            if (selector) {
+                const oldVal = selector.value;
+                selector.innerHTML = optionsHtml;
+                // Try to preserve selection if it still exists
+                if (selector.querySelector(`option[value="${oldVal}"]`)) {
+                    selector.value = oldVal;
+                }
+            }
+        }
+
         let deobfuscateTimeout = null;
         function scheduleUpdateDeobfuscation() {
             if (deobfuscateTimeout) clearTimeout(deobfuscateTimeout);
@@ -1062,15 +1170,17 @@
                     document.getElementById('cfgDotOutput').innerText = result.dot;
                     try {
                         const structObj = JSON.parse(result.structure);
-                        document.getElementById('structure-container').innerText = JSON.stringify(structObj, null, 2);
+                        renderStructureTree(structObj, document.getElementById('structure-container'));
                     } catch(e) {
                         document.getElementById('structure-container').innerText = '结构解析错误: ' + e.message;
                     }
+                    window.lastDot = result.dot;
                     pendingDot = result.dot;
 
                     // Only render CFG immediately if the CFG tab is active
                     if (document.querySelector('.tab[data-tab="cfg"]').classList.contains('active')) {
-                        renderCFG(pendingDot);
+                        const selectedFunc = document.getElementById('cfgFunctionSelector').value;
+                        renderCFG(extractDotForFunction(pendingDot, selectedFunc));
                         pendingDot = null;
                     }
 
