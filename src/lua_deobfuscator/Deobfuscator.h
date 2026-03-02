@@ -15,6 +15,13 @@ struct DeobfuscationResult {
     std::string details;
 };
 
+class IPass {
+public:
+    virtual ~IPass() = default;
+    virtual DeobfuscationResult run(std::shared_ptr<Prototype> proto) = 0;
+    virtual std::string get_name() const = 0;
+};
+
 class Deobfuscator {
 public:
     struct RegValue {
