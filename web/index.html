@@ -350,15 +350,24 @@
 
             .mobile-header {
                 display: flex;
+                flex-shrink: 0;
             }
 
             .sidebar {
+                position: absolute;
+                top: 45px; /* height of mobile-header roughly */
+                left: 0;
+                right: 0;
+                bottom: 0;
                 width: 100%;
+                height: calc(100vh - 45px);
                 border-right: none;
                 border-bottom: 1px solid var(--border-color);
                 display: none; /* Hidden by default on mobile */
-                max-height: 50vh;
+                max-height: none;
                 overflow-y: auto;
+                z-index: 1000;
+                box-shadow: 0 4px 6px rgba(0,0,0,0.3);
             }
 
             .sidebar.show {
@@ -369,6 +378,7 @@
                 overflow-x: auto;
                 flex-wrap: nowrap;
                 -webkit-overflow-scrolling: touch;
+                flex-shrink: 0;
             }
 
             .tab {
@@ -735,6 +745,11 @@
             document.getElementById('info-filename').innerText = file.name;
             document.getElementById('info-filesize').innerText = (file.size / 1024).toFixed(2) + ' KB';
 
+            // Auto-hide sidebar on mobile after selecting a file to show the main content
+            if (window.innerWidth <= 768) {
+                document.getElementById('sidebar').classList.remove('show');
+            }
+
             reader.onload = async (re) => {
                 currentBytecode = new Uint8Array(re.target.result);
                 const magic = Array.from(currentBytecode.slice(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
@@ -775,6 +790,11 @@
                 const baseName = currentFileName.replace(/\.[^/.]+$/, "");
                 addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');
                 addProcessItem(baseName + "_deob.lasm", result.disassembly, 'lasm');
+                
+                // Auto-hide sidebar on mobile after processing to view results
+                if (window.innerWidth <= 768) {
+                    document.getElementById('sidebar').classList.remove('show');
+                }
             } else {
                 alert('处理失败: ' + result.error);
             }
