@@ -1130,6 +1130,72 @@
             }
         }
 
+
+        function renderCollapsibleDisasm(text, containerId) {
+            const container = document.getElementById(containerId);
+            if (!text || text.trim() === '') {
+                container.innerHTML = '暂无数据。';
+                return;
+            }
+
+            const lines = text.split('\n');
+            let html = '';
+            let currentFuncHeader = '';
+            let currentFuncBody = [];
+            let inFunc = false;
+            let currentFuncId = '';
+
+            const makeDetails = (id, header, body) => {
+                return `<details style="margin-bottom: 5px; background: var(--panel-bg); border: 1px solid var(--border-color); border-radius: 4px;">
+                    <summary style="padding: 10px; cursor: pointer; font-weight: bold; color: var(--accent-color); user-select: none;">Function ${id}</summary>
+                    <pre style="margin: 0; border: none; border-top: 1px solid var(--border-color); border-radius: 0 0 4px 4px; padding: 10px; white-space: pre-wrap;">${header}\n${body.join('\n')}</pre>
+                </details>`;
+            };
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (line.trim().startsWith('.func F')) {
+                    if (inFunc) html += makeDetails(currentFuncId, currentFuncHeader, currentFuncBody);
+                    inFunc = true;
+                    currentFuncHeader = line;
+                    currentFuncBody = [];
+                    const match = line.match(/\.func (F\d+)/);
+                    currentFuncId = match ? match[1] : 'Unknown';
+                } else if (line.trim().startsWith('; ') && i < 5 && text.includes('; --[=========[')) {
+                    if (!inFunc && line.includes('upvalues, ') && line.includes('locals, ')) {
+                        inFunc = true;
+                        currentFuncHeader = line;
+                        currentFuncBody = [];
+                        currentFuncId = 'Main';
+                    } else if (inFunc) {
+                        currentFuncBody.push(line);
+                    } else {
+                        html += `<div style="font-family: monospace; color: #d4d4d4; white-space: pre-wrap;">${line}</div>`;
+                    }
+                } else {
+                    if (inFunc) {
+                        currentFuncBody.push(line);
+                    } else {
+                        html += `<div style="font-family: monospace; color: #d4d4d4; white-space: pre-wrap;">${line}</div>`;
+                    }
+                }
+
+                if (inFunc && (line.trim().startsWith('.end ; F') || (currentFuncId === 'Main' && line.trim().startsWith('; ]=========')))) {
+                    html += makeDetails(currentFuncId, currentFuncHeader, currentFuncBody);
+                    inFunc = false;
+                    currentFuncHeader = '';
+                    currentFuncBody = [];
+                    currentFuncId = '';
+                }
+            }
+
+            if (inFunc) {
+                html += makeDetails(currentFuncId, currentFuncHeader, currentFuncBody);
+            }
+
+            container.innerHTML = html;
+        }
+
         let deobfuscateTimeout = null;
         function scheduleUpdateDeobfuscation() {
             if (deobfuscateTimeout) clearTimeout(deobfuscateTimeout);
@@ -1160,13 +1226,13 @@
 
 
                 const processedBytecode = applyPlugins(currentBytecode);
-                const result = LuaDeob.deobfuscate(processedBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);
+                const result = LuaDeob.deobfuscate(processedBytecode, -1, fold, dbe, sbm, dce, deflatten, rse, norm);
 
                 const endTime = performance.now();
                 document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
 
                 if (result.success) {
-                    document.getElementById('optimizedDisasm').innerText = result.disassembly;
+                    renderCollapsibleDisasm(result.disassembly, \'optimizedDisasm\');
                     document.getElementById('cfgDotOutput').innerText = result.dot;
                     try {
                         const structObj = JSON.parse(result.structure);
@@ -1231,9 +1297,9 @@
                 // Get baseline disassembly
                 try {
                     const processedBytecode = applyPlugins(currentBytecode);
-                    const result = LuaDeob.deobfuscate(processedBytecode, false, false, false, false, false, false, false);
+                    const result = LuaDeob.deobfuscate(processedBytecode, -1, false, false, false, false, false, false, false);
                     if (result.success) {
-                        document.getElementById('originalDisasm').innerText = result.disassembly;
+                        renderCollapsibleDisasm(result.disassembly, \'originalDisasm\');
                         updateDeobfuscation();
                     } else {
                         document.getElementById('originalDisasm').innerText = '解析失败: ' + result.error;
@@ -1261,7 +1327,7 @@
 
 
                 const processedBytecode = applyPlugins(currentBytecode);
-                const result = LuaDeob.deobfuscate(processedBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);
+                const result = LuaDeob.deobfuscate(processedBytecode, -1, fold, dbe, sbm, dce, deflatten, rse, norm);
             if (result.success) {
                 const baseName = currentFileName.replace(/\.[^/.]+$/, "");
                 addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');
