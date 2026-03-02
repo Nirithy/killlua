@@ -436,9 +436,10 @@
                     <input type="checkbox" id="normCheck"> 条件判断归一化 (Normalize)
                 </label>
             </div>
-            <div style="margin-top: 15px;">
+            <div style="margin-top: 15px; display: flex; gap: 5px; flex-direction: column;">
                 <input type="file" id="pluginUpload" accept=".wasm" style="display: none;">
                 <button class="btn-mini" onclick="document.getElementById('pluginUpload').click()" style="padding: 6px 10px; width: 100%;">安装自定义插件 (WASM)</button>
+                <button class="btn-mini" onclick="downloadPluginTemplate()" style="padding: 6px 10px; width: 100%; background: #4caf50;">下载插件开发模板 (C)</button>
             </div>
         </div>
 
@@ -529,18 +530,6 @@
     </div>
 
 
-    <!-- Node Editor Modal -->
-    <div id="nodeEditorModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
-        <div style="background:var(--panel-bg); width:80%; max-width:800px; padding:20px; border-radius:8px; display:flex; flex-direction:column; gap:10px; border: 1px solid var(--border-color); box-shadow: 0 4px 15px rgba(0,0,0,0.5);">
-            <h3 style="margin-top:0; color:var(--text-bright);">可视化高级节点编辑</h3>
-            <textarea id="nodeEditorTextarea" style="width:100%; height:400px; background:var(--code-bg); color:#d4d4d4; font-family:'Consolas', 'Monaco', monospace; padding:15px; border:1px solid var(--border-color); border-radius:4px; resize:vertical; tab-size:4; box-sizing:border-box;"></textarea>
-            <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:10px;">
-                <button id="nodeEditorCancel" style="padding:10px 20px; background:#555; border:none; color:white; border-radius:4px; cursor:pointer; font-weight:bold;">取消</button>
-                <button id="nodeEditorSave" style="padding:10px 20px; background:var(--accent-color); border:none; color:white; border-radius:4px; cursor:pointer; font-weight:bold;">保存</button>
-            </div>
-        </div>
-    </div>
-
     <!-- INSERT_JS_HERE -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
 
@@ -577,12 +566,63 @@
                 }
             });
 
+            // Basic hover provider for Opcodes
+            monaco.languages.registerHoverProvider('lasm', {
+                provideHover: function (model, position) {
+                    const word = model.getWordAtPosition(position);
+                    if (word) {
+                        const opMap = {
+                            'JMP': 'Jump (Unconditional or conditional)',
+                            'MOVE': 'Copy a value between registers',
+                            'LOADK': 'Load constant into register',
+                            'GETTABUP': 'Read from upvalue table',
+                            'SETTABUP': 'Write to upvalue table',
+                            'CALL': 'Call a closure',
+                            'RETURN': 'Return to calling function'
+                        };
+                        if (opMap[word.word]) {
+                            return {
+                                range: new monaco.Range(position.lineNumber, word.startColumn, position.lineNumber, word.endColumn),
+                                contents: [
+                                    { value: '**' + word.word + '**' },
+                                    { value: opMap[word.word] }
+                                ]
+                            };
+                        }
+                    }
+                    return null;
+                }
+            });
+
+            // Completion provider
+            monaco.languages.registerCompletionItemProvider('lasm', {
+                provideCompletionItems: function(model, position) {
+                    const word = model.getWordUntilPosition(position);
+                    const range = {
+                        startLineNumber: position.lineNumber,
+                        endLineNumber: position.lineNumber,
+                        startColumn: word.startColumn,
+                        endColumn: word.endColumn
+                    };
+
+                    const suggestions = [
+                        { label: 'MOVE', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'MOVE v0 v1', range: range },
+                        { label: 'LOADK', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'LOADK v0 K0', range: range },
+                        { label: 'JMP', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'JMP :goto_0', range: range },
+                        { label: 'CALL', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'CALL v0 v1', range: range },
+                        { label: 'RETURN', kind: monaco.languages.CompletionItemKind.Keyword, insertText: 'RETURN', range: range }
+                    ];
+
+                    return { suggestions: suggestions };
+                }
+            });
+
             monacoEditor = monaco.editor.create(document.getElementById('asmInput'), {
                 value: '-- 粘贴 .lasm 内容或点击下方上传',
                 language: 'lasm',
                 theme: 'lasm-dark',
                 automaticLayout: true,
-                minimap: { enabled: false },
+                minimap: { enabled: true, renderCharacters: false },
                 scrollBeyondLastLine: false,
                 fontSize: 14,
                 fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace"
@@ -608,6 +648,53 @@
         let currentFileName = "";
 
         let installedPlugins = [];
+
+        function downloadPluginTemplate() {
+            const template = `#include <stdint.h>
+#include <stdlib.h>
+
+#define EXPORT __attribute__((visibility("default")))
+
+int output_size = 0;
+uint8_t* output_buffer = NULL;
+
+EXPORT uint8_t* alloc_mem(int size) {
+    return (uint8_t*)malloc(size);
+}
+
+EXPORT void free_mem(uint8_t* p) {
+    free(p);
+}
+
+// Example plugin: invert all bytes
+// Process is called on bytecode before disassembly
+EXPORT uint8_t* process(uint8_t* input, int size) {
+    if (output_buffer != NULL) {
+        free(output_buffer);
+    }
+
+    output_buffer = (uint8_t*)malloc(size);
+    output_size = size;
+
+    for(int i = 0; i < size; i++) {
+        output_buffer[i] = ~input[i]; // Example: bitwise invert
+    }
+
+    return output_buffer;
+}
+
+EXPORT int get_size() {
+    return output_size;
+}
+`;
+            const blob = new Blob([template], {type: 'text/plain'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = "plugin_template.c";
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        }
 
         // Handle Plugin Upload
         const pluginUpload = document.getElementById('pluginUpload');
@@ -1054,47 +1141,50 @@
                         const nodeId = params.nodes[0];
                         const node = data.nodes.get(nodeId);
 
-                        const modal = document.getElementById('nodeEditorModal');
-                        const textarea = document.getElementById('nodeEditorTextarea');
-                        const saveBtn = document.getElementById('nodeEditorSave');
-                        const cancelBtn = document.getElementById('nodeEditorCancel');
+                        const match = node.label.match(/PC (\d+)-/);
+                        if (match) {
+                            const startPc = parseInt(match[1]);
 
-                        textarea.value = node.label;
-                        modal.style.display = 'flex';
+                            if (!getAsmInputValue() || getAsmInputValue().includes('粘贴 .lasm 内容')) {
+                                const currentDisasm = document.getElementById('optimizedDisasm').innerText;
+                                if (currentDisasm && !currentDisasm.includes('暂无数据')) {
+                                    setAsmInputValue(currentDisasm);
+                                }
+                            }
 
-                        const closeEditor = () => {
-                            modal.style.display = 'none';
-                            saveBtn.onclick = null;
-                            cancelBtn.onclick = null;
-                        };
-
-                        cancelBtn.onclick = closeEditor;
-
-                        saveBtn.onclick = () => {
-                            const newLabel = textarea.value;
-                            data.nodes.update({ id: nodeId, label: newLabel });
-
-                            // To actually integrate with compilation, we take all node labels,
-                            // order them, and construct an ASM string.
-                            const allNodes = data.nodes.get();
-                            allNodes.sort((a,b) => parseInt(a.id) - parseInt(b.id));
-                            let asmContent = "";
-                            allNodes.forEach(n => {
-                                // Extract just the instructions, ignoring the "BBx [PC y-z]" header
-                                const parts = n.label.split('\n');
-                                parts.slice(1).forEach(p => {
-                                    // Remove the "PC: " prefix
-                                    const codeMatch = p.match(/^\d+:\s*(.*)/);
-                                    if (codeMatch) asmContent += codeMatch[1] + "\n";
-                                    else asmContent += p + "\n";
-                                });
-                            });
-
-                            setAsmInputValue(asmContent);
-                            // Switch to ASM tab automatically
                             document.querySelector('.tab[data-tab="asm"]').click();
-                            closeEditor();
-                        };
+
+                            if (monacoEditor) {
+                                const model = monacoEditor.getModel();
+                                const text = model.getValue();
+                                const lines = text.split('\n');
+                                let targetLine = -1;
+
+                                const searchStr = ":goto_" + startPc;
+                                for (let i = 0; i < lines.length; i++) {
+                                    if (lines[i].includes(searchStr)) {
+                                        targetLine = i + 1;
+                                        break;
+                                    }
+                                }
+
+                                if (targetLine === -1) {
+                                    const searchPcStr = " " + startPc + ": ";
+                                    for (let i = 0; i < lines.length; i++) {
+                                        if (lines[i].includes(searchPcStr) || lines[i].startsWith(startPc + ": ")) {
+                                            targetLine = i + 1;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (targetLine !== -1) {
+                                    monacoEditor.revealLineInCenter(targetLine);
+                                    monacoEditor.setPosition({ lineNumber: targetLine, column: 1 });
+                                    monacoEditor.focus();
+                                }
+                            }
+                        }
                     }
                 });
 
