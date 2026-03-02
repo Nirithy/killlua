@@ -436,6 +436,10 @@
                     <input type="checkbox" id="normCheck"> 条件判断归一化 (Normalize)
                 </label>
             </div>
+            <div style="margin-top: 15px;">
+                <input type="file" id="pluginUpload" accept=".wasm" style="display: none;">
+                <button class="btn-mini" onclick="document.getElementById('pluginUpload').click()" style="padding: 6px 10px; width: 100%;">安装自定义插件 (WASM)</button>
+            </div>
         </div>
 
         <button id="processBtn">开始处理字节码</button>
@@ -486,7 +490,7 @@
         <div id="asm" class="tab-content">
             <div class="control-group">
                 <label>汇编 .lasm 内容</label>
-                <textarea id="asmInput" style="width: 100%; height: 300px; background: var(--code-bg); color: #d4d4d4; border: 1px solid var(--border-color); border-radius: 4px; padding: 10px; font-family: monospace;" placeholder="粘贴 .lasm 内容或点击下方上传"></textarea>
+                <div id="asmInput" style="width: 100%; height: 500px; border: 1px solid var(--border-color); border-radius: 4px;"></div>
             </div>
             <div style="display: flex; gap: 10px;">
                 <input type="file" id="asmFileInput" accept=".lasm,.txt" style="display: none;">
@@ -538,11 +542,160 @@
     </div>
 
     <!-- INSERT_JS_HERE -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
 
     <script>
+
+        let monacoEditor = null;
+
+        require.config({ paths: { 'vs': 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' }});
+        require(['vs/editor/editor.main'], function() {
+            monaco.languages.register({ id: 'lasm' });
+            monaco.languages.setMonarchTokensProvider('lasm', {
+                tokenizer: {
+                    root: [
+                        [/^\s*\d+:/, 'keyword'],  // PC
+                        [/\[.*?\]/, 'number'],   // Brackets for line numbers/constants
+                        [/\b(MOVE|LOADK|LOADKX|LOADBOOL|LOADNIL|GETUPVAL|GETTABUP|GETTABLE|SETTABUP|SETUPVAL|SETTABLE|NEWTABLE|SELF|ADD|SUB|MUL|MOD|POW|DIV|IDIV|BAND|BOR|BXOR|SHL|SHR|UNM|BNOT|NOT|LEN|CONCAT|JMP|EQ|LT|LE|TEST|TESTSET|CALL|TAILCALL|RETURN|FORLOOP|FORPREP|TFORCALL|TFORLOOP|SETLIST|CLOSURE|VARARG|EXTRAARG)\b/, 'keyword'], // Opcodes
+                        [/;.*/, 'comment'], // Comments
+                        [/\b(R\d+|U\d+|K\d+)\b/, 'variable'], // Registers/Upvalues/Constants
+                    ]
+                }
+            });
+
+            monaco.editor.defineTheme('lasm-dark', {
+                base: 'vs-dark',
+                inherit: true,
+                rules: [
+                    { token: 'keyword', foreground: '569cd6' },
+                    { token: 'number', foreground: 'b5cea8' },
+                    { token: 'comment', foreground: '608b4e' },
+                    { token: 'variable', foreground: '9cdcfe' }
+                ],
+                colors: {
+                    'editor.background': '#1e1e1e'
+                }
+            });
+
+            monacoEditor = monaco.editor.create(document.getElementById('asmInput'), {
+                value: '-- 粘贴 .lasm 内容或点击下方上传',
+                language: 'lasm',
+                theme: 'lasm-dark',
+                automaticLayout: true,
+                minimap: { enabled: false },
+                scrollBeyondLastLine: false,
+                fontSize: 14,
+                fontFamily: "'Consolas', 'Monaco', 'Courier New', monospace"
+            });
+        });
+
+        // Helper to set editor value safely
+        function setAsmInputValue(val) {
+            if (monacoEditor) {
+                monacoEditor.setValue(val);
+            } else {
+                // fallback if not loaded yet
+                setTimeout(() => setAsmInputValue(val), 100);
+            }
+        }
+
+        function getAsmInputValue() {
+            return monacoEditor ? monacoEditor.getValue() : '';
+        }
+
         let LuaDeob = null;
         let currentBytecode = null;
         let currentFileName = "";
+
+        let installedPlugins = [];
+
+        // Handle Plugin Upload
+        const pluginUpload = document.getElementById('pluginUpload');
+        if (pluginUpload) {
+            pluginUpload.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                try {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const wasmModule = await WebAssembly.instantiate(arrayBuffer, {
+                        env: {
+                            memory: new WebAssembly.Memory({ initial: 256 })
+                        }
+                    });
+
+                    const exports = wasmModule.instance.exports;
+
+                    // Validate plugin interface
+                    if (!exports.process || !exports.alloc_mem || !exports.free_mem || !exports.get_size || !exports.memory) {
+                        alert('插件接口不兼容。需导出: alloc_mem, free_mem, process, get_size 和 memory');
+                        return;
+                    }
+
+                    const pluginName = file.name.replace('.wasm', '');
+                    const pluginId = 'plugin_' + Date.now();
+
+                    installedPlugins.push({
+                        id: pluginId,
+                        name: pluginName,
+                        exports: exports
+                    });
+
+                    // Add to UI
+                    const cbGroup = document.querySelector('.checkbox-group');
+                    const label = document.createElement('label');
+                    label.className = 'checkbox-item';
+                    label.innerHTML = `<input type="checkbox" id="${pluginId}"> [插件] ${pluginName}`;
+                    cbGroup.appendChild(label);
+
+                    // Add listener for real-time update
+                    document.getElementById(pluginId).onchange = scheduleUpdateDeobfuscation;
+
+                    alert(`插件 "${pluginName}" 安装成功并已加入优化列表！`);
+
+                } catch (err) {
+                    console.error(err);
+                    alert('插件加载失败: ' + err.message);
+                }
+
+                // Clear input so same file can be selected again
+                pluginUpload.value = '';
+            });
+        }
+
+        // Apply plugins sequentially to bytecode
+        function applyPlugins(bytecodeUint8) {
+            let currentData = new Uint8Array(bytecodeUint8);
+
+            for (const plugin of installedPlugins) {
+                const checkbox = document.getElementById(plugin.id);
+                if (checkbox && checkbox.checked) {
+                    const exports = plugin.exports;
+                    const memory = new Uint8Array(exports.memory.buffer);
+
+                    const inLen = currentData.length;
+                    const inPtr = exports.alloc_mem(inLen);
+
+                    // Copy data to plugin memory
+                    memory.set(currentData, inPtr);
+
+                    // Process
+                    const outPtr = exports.process(inPtr, inLen);
+                    const outSize = exports.get_size();
+
+                    // Read back
+                    if (outSize > 0 && outPtr !== 0) {
+                        const newMem = new Uint8Array(exports.memory.buffer);
+                        currentData = new Uint8Array(newMem.slice(outPtr, outPtr + outSize));
+                    }
+
+                    exports.free_mem(inPtr);
+                }
+            }
+
+            return currentData;
+        }
+
 
         // Sidebar Toggle Logic for Mobile
         const sidebar = document.getElementById('sidebar');
@@ -657,13 +810,13 @@
             const file = e.target.files[0];
             const reader = new FileReader();
             reader.onload = (re) => {
-                document.getElementById('asmInput').value = re.target.result;
+                setAsmInputValue(re.target.result);
             };
             reader.readAsText(file);
         };
 
         document.getElementById('assembleBtn').onclick = async () => {
-            const content = document.getElementById('asmInput').value;
+            const content = getAsmInputValue();
             if (!content) {
                 alert('请先输入或上传 .lasm 内容');
                 return;
@@ -721,7 +874,9 @@
                 const rse = document.getElementById('rseCheck').checked;
                 const norm = document.getElementById('normCheck').checked;
 
-                const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);
+
+                const processedBytecode = applyPlugins(currentBytecode);
+                const result = LuaDeob.deobfuscate(processedBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);
 
                 const endTime = performance.now();
                 document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
@@ -789,7 +944,8 @@
 
                 // Get baseline disassembly
                 try {
-                    const result = LuaDeob.deobfuscate(currentBytecode, false, false, false, false, false, false, false);
+                    const processedBytecode = applyPlugins(currentBytecode);
+                    const result = LuaDeob.deobfuscate(processedBytecode, false, false, false, false, false, false, false);
                     if (result.success) {
                         document.getElementById('originalDisasm').innerText = result.disassembly;
                         updateDeobfuscation();
@@ -817,7 +973,9 @@
             const rse = document.getElementById('rseCheck').checked;
             const norm = document.getElementById('normCheck').checked;
 
-            const result = LuaDeob.deobfuscate(currentBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);
+
+                const processedBytecode = applyPlugins(currentBytecode);
+                const result = LuaDeob.deobfuscate(processedBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);
             if (result.success) {
                 const baseName = currentFileName.replace(/\.[^/.]+$/, "");
                 addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');
@@ -932,7 +1090,7 @@
                                 });
                             });
 
-                            document.getElementById('asmInput').value = asmContent;
+                            setAsmInputValue(asmContent);
                             // Switch to ASM tab automatically
                             document.querySelector('.tab[data-tab="asm"]').click();
                             closeEditor();
