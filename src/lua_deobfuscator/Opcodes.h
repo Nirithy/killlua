@@ -96,6 +96,8 @@ std::string get_opcode_name(Opcode opcode);
 std::string get_opcode_name(int opcode);
 OpMode get_opcode_mode(Opcode opcode);
 OpMode get_opcode_mode(int opcode);
+Opcode map_raw_opcode(int raw_op, int version);
+int unmap_opcode(Opcode op, int version);
 
 // Instruction field sizes and positions
 constexpr int SIZE_OP = 6;

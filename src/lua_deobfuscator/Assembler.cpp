@@ -336,6 +336,7 @@ std::shared_ptr<Prototype> Assembler::parse_prototype(std::vector<Token>::iterat
             } else if (mode == OpMode::iAx) {
                 if (args.size() >= 1) instr.ax = std::stoi(args[0].value);
             }
+            instr = Instruction::encode_new(instr.opcode, proto->version, instr.a, instr.b, instr.c, instr.sbx, instr.ax);
             proto->code.push_back(instr);
         } else {
             it++;
@@ -346,8 +347,7 @@ std::shared_ptr<Prototype> Assembler::parse_prototype(std::vector<Token>::iterat
         if (labels.count(f.label)) {
             int target = labels[f.label];
             int sbx = target - f.pc - 1;
-            proto->code[f.pc].sbx = sbx;
-            proto->code[f.pc].bx = sbx + 131071;
+            proto->code[f.pc] = Instruction::encode_new(proto->code[f.pc].opcode, proto->version, proto->code[f.pc].a, proto->code[f.pc].b, proto->code[f.pc].c, sbx, proto->code[f.pc].ax);
         }
     }
 

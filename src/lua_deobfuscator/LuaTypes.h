@@ -35,10 +35,11 @@ struct Instruction {
     int a, b, c, bx, sbx, ax;
     OpMode mode;
 
-    static Instruction decode(uint32_t raw) {
+    static Instruction decode(uint32_t raw, int version = 0x52) {
         Instruction instr;
         instr.raw = raw;
-        instr.opcode = raw & 0x3F;
+        int raw_op = raw & 0x3F;
+        instr.opcode = static_cast<int>(lua_deobfuscator::map_raw_opcode(raw_op, version));
         instr.a = (raw >> 6) & 0xFF;
         instr.c = (raw >> 14) & 0x1FF;
         instr.b = (raw >> 23) & 0x1FF;
@@ -51,20 +52,21 @@ struct Instruction {
         return instr;
     }
 
-    static Instruction encode_new(int opcode, int a = 0, int b = 0, int c = 0, int sbx = 0, int ax = 0) {
-        OpMode mode = get_opcode_mode(opcode);
+    static Instruction encode_new(int opcode, int version = 0x52, int a = 0, int b = 0, int c = 0, int sbx = 0, int ax = 0) {
+        OpMode op_mode = get_opcode_mode(opcode);
+        int raw_op = lua_deobfuscator::unmap_opcode(static_cast<lua_deobfuscator::Opcode>(opcode), version);
         uint32_t raw = 0;
         int bx = 0;
 
-        if (mode == OpMode::iABC) {
-            raw = (opcode & 0x3F) | ((a & 0xFF) << 6) | ((c & 0x1FF) << 14) | ((b & 0x1FF) << 23);
-        } else if (mode == OpMode::iABx || mode == OpMode::iAsBx) {
-            bx = sbx + 131071;
-            raw = (opcode & 0x3F) | ((a & 0xFF) << 6) | ((bx & 0x3FFFF) << 14);
+        if (op_mode == OpMode::iABC) {
+            raw = (raw_op & 0x3F) | ((a & 0xFF) << 6) | ((c & 0x1FF) << 14) | ((b & 0x1FF) << 23);
+        } else if (op_mode == OpMode::iABx || op_mode == OpMode::iAsBx) {
+            bx = (op_mode == OpMode::iABx) ? b : (sbx + 131071);
+            raw = (raw_op & 0x3F) | ((a & 0xFF) << 6) | ((bx & 0x3FFFF) << 14);
         } else { // iAx
-            raw = (opcode & 0x3F) | ((ax & 0x3FFFFFF) << 6);
+            raw = (raw_op & 0x3F) | ((ax & 0x3FFFFFF) << 6);
         }
-        return decode(raw);
+        return decode(raw, version);
     }
 };
 
@@ -107,6 +109,7 @@ struct Upvalue {
 };
 
 struct Prototype {
+    int version = 0x52; // Default to 5.2
     std::string source;
     int line_defined;
     int last_line_defined;

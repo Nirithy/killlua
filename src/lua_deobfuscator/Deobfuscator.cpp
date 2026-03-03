@@ -53,7 +53,7 @@ DeobfuscationResult Deobfuscator::run_constant_folding() {
                             nc.value = res;
                             int n_idx = proto->constants.size();
                             proto->constants.push_back(nc);
-                            instr = Instruction::encode_new(static_cast<int>(Opcode::LOADK), instr.a, 0, 0, 0, 0);
+                            instr = Instruction::encode_new(static_cast<int>(Opcode::LOADK), proto->version, instr.a, 0, 0, 0, 0);
                             instr.bx = n_idx;
                             instr.raw = ((instr.opcode & 0x3F) | ((instr.a & 0xFF) << 6) | ((instr.bx & 0x3FFFF) << 14));
                             changes++;
@@ -362,7 +362,7 @@ DeobfuscationResult Deobfuscator::run_dead_branch_elimination() {
                     if (op == Opcode::TESTSET) {
                         EdgeType et = cfg->edges[{id, valid_succ}];
                         if (et == EdgeType::COND_FALSE) {
-                            last_instr = Instruction::encode_new(static_cast<int>(Opcode::MOVE), last_instr.a, last_instr.b);
+                            last_instr = Instruction::encode_new(static_cast<int>(Opcode::MOVE), proto->version, last_instr.a, last_instr.b);
                         } else {
                             block->instructions.pop_back();
                         }
