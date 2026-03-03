@@ -274,6 +274,12 @@ std::shared_ptr<Prototype> Assembler::parse_prototype(std::vector<Token>::iterat
             }
 
             Instruction instr;
+            instr.a = 0;
+            instr.b = 0;
+            instr.c = 0;
+            instr.bx = 0;
+            instr.sbx = 0;
+            instr.ax = 0;
             instr.opcode = static_cast<int>(op);
             instr.opcode_name = op_name;
             OpMode mode = get_opcode_mode(op);

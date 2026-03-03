@@ -457,6 +457,7 @@
     <div class="main-content">
         <div class="tabs">
             <div class="tab active" data-tab="disasm">反汇编对比</div>
+            <div class="tab" data-tab="analysis">函数分析</div>
             <div class="tab" data-tab="cfg">控制流图 (CFG)</div>
             <div class="tab" data-tab="cfg-dot">CFG DOT 源码</div>
             <div class="tab" data-tab="asm">汇编处理</div>
@@ -515,6 +516,44 @@
         <div id="structure" class="tab-content" style="padding: 20px; overflow-y: auto;">
             <div id="structure-container" style="background: var(--code-bg); color: #d4d4d4; padding: 15px; border-radius: 4px; border: 1px solid var(--border-color); font-family: monospace;">
                 <!-- Structure will be displayed here -->
+            </div>
+        </div>
+
+        <div id="analysis" class="tab-content">
+            <div style="display: flex; gap: 20px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 300px; display: flex; flex-direction: column; gap: 15px;">
+                    <div class="control-group">
+                        <label>选择要分析的函数</label>
+                        <select id="analysisFunctionSelector" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--panel-bg); color: var(--text-color);">
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+
+                    <div class="control-group">
+                        <label>单函数混淆优化项</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-foldCheck"> 常量折叠</label>
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-dbeCheck"> 死分支消除</label>
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-sbmCheck"> 顺序块合并</label>
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-dceCheck"> 死代码消除</label>
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-deflattenCheck"> 反扁平化</label>
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-rseCheck"> 冗余存储消除</label>
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-normCheck"> 条件分支归一化</label>
+                        </div>
+                    </div>
+
+                    <button id="analysisApplyBtn" class="btn-mini" style="padding: 10px; font-size: 1rem;">应用优化到此函数</button>
+
+                    <div style="margin-top: 15px;">
+                        <h4 style="margin: 0 0 10px 0; color: var(--text-bright);">函数伪代码</h4>
+                        <pre id="pseudoCodeOutput" style="min-height: 200px; max-height: 400px;"></pre>
+                    </div>
+                </div>
+
+                <div style="flex: 2; min-width: 400px; display: flex; flex-direction: column;">
+                    <h4 style="margin: 0 0 10px 0; color: var(--text-bright);">函数控制流图 (CFG)</h4>
+                    <div id="analysis-cfg-container" style="flex-grow: 1; border: 1px solid var(--border-color); border-radius: 4px; background: white; min-height: 600px;"></div>
+                </div>
             </div>
         </div>
 
@@ -841,6 +880,12 @@
                     const selectedFunc = document.getElementById('cfgFunctionSelector').value;
                     renderCFG(extractDotForFunction(pendingDot, selectedFunc));
                     pendingDot = null;
+                } else if (tab.dataset.tab === 'analysis' && window.lastDot) {
+                    const selectedFunc = document.getElementById('analysisFunctionSelector').value;
+                    if (selectedFunc) {
+                        renderCFG(extractDotForFunction(window.lastDot, selectedFunc), 'analysis-cfg-container');
+                        updateAnalysisPseudoCode(selectedFunc);
+                    }
                 }
             };
         });
@@ -852,6 +897,66 @@
                 selector.addEventListener('change', (e) => {
                     if (window.lastDot) {
                         renderCFG(extractDotForFunction(window.lastDot, e.target.value));
+                    }
+                });
+            }
+
+            const analysisSelector = document.getElementById('analysisFunctionSelector');
+            if (analysisSelector) {
+                analysisSelector.addEventListener('change', (e) => {
+                    if (window.lastDot) {
+                        renderCFG(extractDotForFunction(window.lastDot, e.target.value), 'analysis-cfg-container');
+                        updateAnalysisPseudoCode(e.target.value);
+                    }
+                });
+            }
+
+            const analysisApplyBtn = document.getElementById('analysisApplyBtn');
+            if (analysisApplyBtn) {
+                analysisApplyBtn.addEventListener('click', () => {
+                    if (!currentBytecode || !LuaDeob) return;
+                    const funcId = parseInt(document.getElementById('analysisFunctionSelector').value);
+                    if (isNaN(funcId)) return;
+
+                    const fold = document.getElementById('analysis-foldCheck').checked;
+                    const dbe = document.getElementById('analysis-dbeCheck').checked;
+                    const sbm = document.getElementById('analysis-sbmCheck').checked;
+                    const dce = document.getElementById('analysis-dceCheck').checked;
+                    const deflatten = document.getElementById('analysis-deflattenCheck').checked;
+                    const rse = document.getElementById('analysis-rseCheck').checked;
+                    const norm = document.getElementById('analysis-normCheck').checked;
+
+                    document.getElementById('status').innerText = '正在对单函数进行处理...';
+                    document.getElementById('status').style.color = '#cccccc';
+
+                    try {
+                        const processedBytecode = applyPlugins(currentBytecode);
+                        const result = LuaDeob.deobfuscate(processedBytecode, funcId, fold, dbe, sbm, dce, deflatten, rse, norm);
+                        if (result.success) {
+                            window.lastDot = result.dot;
+                            pendingDot = result.dot;
+                            currentBytecode = result.bytecode; // update bytecode state
+
+                            // Re-render global ones too
+                            renderCollapsibleDisasm(result.disassembly, 'optimizedDisasm');
+                            document.getElementById('cfgDotOutput').innerText = result.dot;
+                            try {
+                                const structObj = JSON.parse(result.structure);
+                                renderStructureTree(structObj, document.getElementById('structure-container'));
+                            } catch(e) {}
+
+                            renderCFG(extractDotForFunction(result.dot, funcId), 'analysis-cfg-container');
+                            updateAnalysisPseudoCode(funcId);
+
+                            document.getElementById('status').innerText = '处理完成';
+                            document.getElementById('status').style.color = '#4caf50';
+                        } else {
+                            document.getElementById('status').innerText = '处理失败: ' + result.error;
+                            document.getElementById('status').style.color = '#f44336';
+                        }
+                    } catch (e) {
+                        document.getElementById('status').innerText = '处理失败: ' + e.message;
+                        document.getElementById('status').style.color = '#f44336';
                     }
                 });
             }
@@ -1054,6 +1159,129 @@
             }
         };
 
+        function updateAnalysisPseudoCode(funcId) {
+            const container = document.getElementById('pseudoCodeOutput');
+            if (!container) return;
+            const text = document.getElementById('optimizedDisasm').innerText;
+            if (!text || text.trim() === '' || text.includes('暂无数据')) {
+                container.innerText = '暂无反汇编数据。';
+                return;
+            }
+
+            const lines = text.split('\n');
+            let funcLines = [];
+            let inFunc = false;
+            let targetIdStr = `F${funcId}`;
+            if (funcId === "0" || funcId === 0) targetIdStr = 'Main';
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                if (targetIdStr === 'Main') {
+                    if (line.trim().startsWith('; ') && i < 5 && text.includes('; --[=========[')) {
+                        if (line.includes('upvalues, ') && line.includes('locals, ')) {
+                            inFunc = true;
+                            continue;
+                        }
+                    }
+                    if (inFunc && line.trim().startsWith('.func F')) {
+                        inFunc = false;
+                        break;
+                    }
+                } else {
+                    if (line.trim().startsWith(`.func ${targetIdStr} `)) {
+                        inFunc = true;
+                        continue;
+                    }
+                    if (inFunc && line.trim().startsWith(`.end ; ${targetIdStr}`)) {
+                        inFunc = false;
+                        break;
+                    }
+                }
+
+                if (inFunc && !line.trim().startsWith(';') && !line.trim().startsWith('.func') && !line.trim().startsWith('.end') && !line.trim().startsWith('.source') && !line.trim().startsWith('.linedefined') && !line.trim().startsWith('.lastlinedefined') && !line.trim().startsWith('.numparams') && !line.trim().startsWith('.is_vararg') && !line.trim().startsWith('.maxstacksize')) {
+                    funcLines.push(line);
+                }
+            }
+
+            let pseudo = "";
+            let indent = "";
+            for (let line of funcLines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                if (trimmed.startsWith(':goto_')) {
+                    pseudo += `\n${trimmed}\n`;
+                    continue;
+                }
+
+                if (trimmed.startsWith('.local') || trimmed.startsWith('.upval')) {
+                    pseudo += `// ${trimmed}\n`;
+                    continue;
+                }
+
+                const parts = trimmed.split(/\s+/);
+                const op = parts[0];
+
+                let stmt = line;
+
+                if (op === 'MOVE' && parts.length >= 3) {
+                    stmt = `${parts[1]} = ${parts[2]}`;
+                } else if (op === 'LOADK' && parts.length >= 3) {
+                    stmt = `${parts[1]} = ${parts.slice(2).join(' ')}`;
+                } else if (op === 'LOADBOOL' && parts.length >= 4) {
+                    stmt = `${parts[1]} = ${parts[2] !== '0' ? 'true' : 'false'}`;
+                    if (parts[3] !== '0') stmt += ` // skip next`;
+                } else if (op === 'LOADNIL' && parts.length >= 2) {
+                    stmt = `${parts[1]} = nil`;
+                } else if (op === 'GETUPVAL' && parts.length >= 3) {
+                    stmt = `${parts[1]} = ${parts[2]}`;
+                } else if (op === 'GETTABUP' && parts.length >= 4) {
+                    stmt = `${parts[1]} = ${parts[2]}[${parts[3]}]`;
+                } else if (op === 'GETTABLE' && parts.length >= 4) {
+                    stmt = `${parts[1]} = ${parts[2]}[${parts[3]}]`;
+                } else if (op === 'SETTABUP' && parts.length >= 4) {
+                    stmt = `${parts[1]}[${parts[2]}] = ${parts[3]}`;
+                } else if (op === 'SETUPVAL' && parts.length >= 3) {
+                    stmt = `${parts[2]} = ${parts[1]}`;
+                } else if (op === 'SETTABLE' && parts.length >= 4) {
+                    stmt = `${parts[1]}[${parts[2]}] = ${parts[3]}`;
+                } else if (op === 'NEWTABLE' && parts.length >= 4) {
+                    stmt = `${parts[1]} = {}`;
+                } else if (op === 'SELF' && parts.length >= 4) {
+                    stmt = `${parts[1]} = ${parts[2]}[${parts[3]}] // self`;
+                } else if (['ADD', 'SUB', 'MUL', 'DIV', 'MOD', 'POW', 'IDIV', 'BAND', 'BOR', 'BXOR', 'SHL', 'SHR'].includes(op) && parts.length >= 4) {
+                    const symMap = {'ADD':'+', 'SUB':'-', 'MUL':'*', 'DIV':'/', 'MOD':'%', 'POW':'^', 'IDIV':'//', 'BAND':'&', 'BOR':'|', 'BXOR':'~', 'SHL':'<<', 'SHR':'>>'};
+                    stmt = `${parts[1]} = ${parts[2]} ${symMap[op]} ${parts[3]}`;
+                } else if (['UNM', 'BNOT', 'NOT', 'LEN'].includes(op) && parts.length >= 3) {
+                    const symMap = {'UNM':'-', 'BNOT':'~', 'NOT':'not ', 'LEN':'#'};
+                    stmt = `${parts[1]} = ${symMap[op]}${parts[2]}`;
+                } else if (op === 'CONCAT' && parts.length >= 4) {
+                    stmt = `${parts[1]} = ${parts[2]} .. ${parts[3]}`;
+                } else if (op === 'JMP' && parts.length >= 2) {
+                    stmt = `goto ${parts[parts.length-1]}`;
+                } else if (['EQ', 'LT', 'LE', 'NEQ', 'GE', 'GT'].includes(op) && parts.length >= 4) {
+                    const symMap = {'EQ':'==', 'LT':'<', 'LE':'<=', 'NEQ':'~=', 'GE':'>=', 'GT':'>'};
+                    stmt = `if (${parts[2]} ${symMap[op]} ${parts[3]}) == ${parts[1] !== '0' ? 'true' : 'false'} then`;
+                } else if (op === 'TEST' && parts.length >= 3) {
+                    stmt = `if not (${parts[1]} <=> ${parts[2]}) then`;
+                } else if (op === 'TESTSET' && parts.length >= 4) {
+                    stmt = `if (${parts[2]} <=> ${parts[3]}) then ${parts[1]} = ${parts[2]}`;
+                } else if (op === 'CALL' && parts.length >= 3) {
+                    stmt = `${parts.length >= 4 ? parts[3] : parts[1]+'...'} = ${parts[1]}(${parts[2]})`;
+                } else if (op === 'TAILCALL' && parts.length >= 3) {
+                    stmt = `return ${parts[1]}(${parts[2]})`;
+                } else if (op === 'RETURN') {
+                    stmt = `return ${parts.slice(1).join(' ')}`;
+                } else if (op === 'CLOSURE' && parts.length >= 3) {
+                    stmt = `${parts[1]} = function(${parts[2]})`;
+                }
+
+                pseudo += `  ${stmt}\n`;
+            }
+
+            container.innerText = pseudo || "No instructions found.";
+        }
+
         function extractDotForFunction(dotStr, functionId) {
             if (functionId === "-1" || functionId === -1) return dotStr;
             const prefix = `F${functionId}_BB`;
@@ -1070,6 +1298,7 @@
         function renderStructureTree(structObj, container) {
             let html = '';
             let optionsHtml = '<option value="-1">所有函数 (All)</option>';
+            let analysisOptionsHtml = '';
             let funcIndex = 0;
 
             function recurse(node, level) {
@@ -1078,6 +1307,7 @@
                 const funcName = isMain ? 'Main' : `F${currentFuncId}`;
 
                 optionsHtml += `<option value="${currentFuncId}">${funcName}</option>`;
+                analysisOptionsHtml += `<option value="${currentFuncId}">${funcName}</option>`;
 
                 html += `<div style="margin-left: ${level * 20}px; border-left: 1px solid var(--border-color); padding-left: 10px; margin-bottom: 10px;">`;
                 html += `<h4 style="margin: 0 0 5px 0; color: var(--text-bright); display: flex; align-items: center; gap: 10px;">
@@ -1126,6 +1356,15 @@
                 // Try to preserve selection if it still exists
                 if (selector.querySelector(`option[value="${oldVal}"]`)) {
                     selector.value = oldVal;
+                }
+            }
+
+            const analysisSelector = document.getElementById('analysisFunctionSelector');
+            if (analysisSelector) {
+                const oldVal = analysisSelector.value;
+                analysisSelector.innerHTML = analysisOptionsHtml;
+                if (analysisSelector.querySelector(`option[value="${oldVal}"]`)) {
+                    analysisSelector.value = oldVal;
                 }
             }
         }
@@ -1342,9 +1581,10 @@
             }
         };
 
-        async function renderCFG(dot) {
+        async function renderCFG(dot, containerId = 'cfg-container') {
             try {
-                const container = document.getElementById('cfg-container');
+                const container = document.getElementById(containerId);
+                if (!container) return;
                 container.innerHTML = '';
 
                 // Replace literal \n in dot string with actual newlines so parser handles multiline text
@@ -1435,7 +1675,7 @@
 
             } catch (e) {
                 console.error(e);
-                document.getElementById('cfg-container').innerHTML = `<p style="color: red; padding: 20px;">CFG 渲染错误: ${e.message || e}</p>`;
+                document.getElementById(containerId).innerHTML = `<p style="color: red; padding: 20px;">CFG 渲染错误: ${e.message || e}</p>`;
             }
         }
 
