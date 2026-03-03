@@ -50,7 +50,7 @@ void Serializer::serialize_prototype(std::shared_ptr<Prototype> p, const LuaHead
     // Code
     writer.write_uint32(p->code.size(), h.size_int);
     for (const auto& instr : p->code) {
-        writer.write_uint32(instr.raw, 4);
+        writer.write_uint32(instr.raw, h.size_instruction ? h.size_instruction : 4);
     }
 
     // Constants

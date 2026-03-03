@@ -209,8 +209,9 @@ std::vector<Instruction> CFG::rebuild_code() {
                 if (target_id != -1) {
                     int target_pc = block_new_start[target_id];
                     instr.sbx = target_pc - pc - 1;
-                    instr.bx = instr.sbx + 131071;
-                    instr.raw = ((instr.opcode & 0x3F) | ((instr.a & 0xFF) << 6) | ((instr.bx & 0x3FFFF) << 14));
+                    instr.bx = (instr.mode == OpMode::iABx) ? instr.b : (instr.sbx + 131071);
+                    int raw_op = lua_deobfuscator::unmap_opcode(op, proto->version);
+                    instr.raw = ((raw_op & 0x3F) | ((instr.a & 0xFF) << 6) | ((instr.bx & 0x3FFFF) << 14));
                 }
             }
             new_code.push_back(instr);

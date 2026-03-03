@@ -102,6 +102,7 @@ std::string Parser::read_lua_string_53() {
 
 std::shared_ptr<Prototype> Parser::parse_prototype_52(const LuaHeader& header) {
     auto p = std::make_shared<Prototype>();
+    p->version = 0x52;
     p->line_defined = reader.read_int32(header.size_int);
     p->last_line_defined = reader.read_int32(header.size_int);
     p->num_params = reader.read_byte();
@@ -111,7 +112,7 @@ std::shared_ptr<Prototype> Parser::parse_prototype_52(const LuaHeader& header) {
     // Code
     uint32_t code_size = reader.read_uint32(header.size_int);
     for (uint32_t i = 0; i < code_size; ++i) {
-        p->code.push_back(Instruction::decode(reader.read_uint32(4)));
+        p->code.push_back(Instruction::decode(reader.read_uint32(4), 0x52));
     }
 
     // Constants
@@ -175,6 +176,7 @@ std::shared_ptr<Prototype> Parser::parse_prototype_52(const LuaHeader& header) {
 
 std::shared_ptr<Prototype> Parser::parse_prototype_53(const LuaHeader& header, const std::string& parent_source) {
     auto p = std::make_shared<Prototype>();
+    p->version = 0x53;
     p->source = read_lua_string_53();
     if (p->source.empty()) p->source = parent_source;
 
@@ -187,7 +189,7 @@ std::shared_ptr<Prototype> Parser::parse_prototype_53(const LuaHeader& header, c
     // Code
     uint32_t code_size = reader.read_uint32(4);
     for (uint32_t i = 0; i < code_size; ++i) {
-        p->code.push_back(Instruction::decode(reader.read_uint32(4)));
+        p->code.push_back(Instruction::decode(reader.read_uint32(4), 0x53));
     }
 
     // Constants

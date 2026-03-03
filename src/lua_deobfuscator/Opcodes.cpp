@@ -96,4 +96,117 @@ OpMode get_opcode_mode(int opcode) {
     return get_opcode_mode(static_cast<Opcode>(opcode));
 }
 
+
+
+Opcode map_raw_opcode(int raw_op, int version) {
+    if (version == 0x53) {
+        switch(raw_op) {
+            case 0: return Opcode::MOVE;
+            case 1: return Opcode::LOADK;
+            case 2: return Opcode::LOADKX;
+            case 3: return Opcode::LOADBOOL;
+            case 4: return Opcode::LOADNIL;
+            case 5: return Opcode::GETUPVAL;
+            case 6: return Opcode::GETTABUP;
+            case 7: return Opcode::GETTABLE;
+            case 8: return Opcode::SETTABUP;
+            case 9: return Opcode::SETUPVAL;
+            case 10: return Opcode::SETTABLE;
+            case 11: return Opcode::NEWTABLE;
+            case 12: return Opcode::SELF;
+            case 13: return Opcode::ADD;
+            case 14: return Opcode::SUB;
+            case 15: return Opcode::MUL;
+            case 16: return Opcode::MOD;
+            case 17: return Opcode::POW;
+            case 18: return Opcode::DIV;
+            case 19: return Opcode::IDIV;
+            case 20: return Opcode::BAND;
+            case 21: return Opcode::BOR;
+            case 22: return Opcode::BXOR;
+            case 23: return Opcode::SHL;
+            case 24: return Opcode::SHR;
+            case 25: return Opcode::UNM;
+            case 26: return Opcode::BNOT;
+            case 27: return Opcode::NOT;
+            case 28: return Opcode::LEN;
+            case 29: return Opcode::CONCAT;
+            case 30: return Opcode::JMP;
+            case 31: return Opcode::EQ;
+            case 32: return Opcode::LT;
+            case 33: return Opcode::LE;
+            case 34: return Opcode::TEST;
+            case 35: return Opcode::TESTSET;
+            case 36: return Opcode::CALL;
+            case 37: return Opcode::TAILCALL;
+            case 38: return Opcode::RETURN;
+            case 39: return Opcode::FORLOOP;
+            case 40: return Opcode::FORPREP;
+            case 41: return Opcode::TFORCALL;
+            case 42: return Opcode::TFORLOOP;
+            case 43: return Opcode::SETLIST;
+            case 44: return Opcode::CLOSURE;
+            case 45: return Opcode::VARARG;
+            case 46: return Opcode::EXTRAARG;
+            default: return Opcode::EXTRAARG;
+        }
+    }
+    return static_cast<Opcode>(raw_op);
+}
+
+int unmap_opcode(Opcode op, int version) {
+    if (version == 0x53) {
+        switch(op) {
+            case Opcode::MOVE: return 0;
+            case Opcode::LOADK: return 1;
+            case Opcode::LOADKX: return 2;
+            case Opcode::LOADBOOL: return 3;
+            case Opcode::LOADNIL: return 4;
+            case Opcode::GETUPVAL: return 5;
+            case Opcode::GETTABUP: return 6;
+            case Opcode::GETTABLE: return 7;
+            case Opcode::SETTABUP: return 8;
+            case Opcode::SETUPVAL: return 9;
+            case Opcode::SETTABLE: return 10;
+            case Opcode::NEWTABLE: return 11;
+            case Opcode::SELF: return 12;
+            case Opcode::ADD: return 13;
+            case Opcode::SUB: return 14;
+            case Opcode::MUL: return 15;
+            case Opcode::MOD: return 16;
+            case Opcode::POW: return 17;
+            case Opcode::DIV: return 18;
+            case Opcode::IDIV: return 19;
+            case Opcode::BAND: return 20;
+            case Opcode::BOR: return 21;
+            case Opcode::BXOR: return 22;
+            case Opcode::SHL: return 23;
+            case Opcode::SHR: return 24;
+            case Opcode::UNM: return 25;
+            case Opcode::BNOT: return 26;
+            case Opcode::NOT: return 27;
+            case Opcode::LEN: return 28;
+            case Opcode::CONCAT: return 29;
+            case Opcode::JMP: return 30;
+            case Opcode::EQ: return 31;
+            case Opcode::LT: return 32;
+            case Opcode::LE: return 33;
+            case Opcode::TEST: return 34;
+            case Opcode::TESTSET: return 35;
+            case Opcode::CALL: return 36;
+            case Opcode::TAILCALL: return 37;
+            case Opcode::RETURN: return 38;
+            case Opcode::FORLOOP: return 39;
+            case Opcode::FORPREP: return 40;
+            case Opcode::TFORCALL: return 41;
+            case Opcode::TFORLOOP: return 42;
+            case Opcode::SETLIST: return 43;
+            case Opcode::CLOSURE: return 44;
+            case Opcode::VARARG: return 45;
+            case Opcode::EXTRAARG: return 46;
+            default: return 46;
+        }
+    }
+    return static_cast<int>(op);
+}
 } // namespace lua_deobfuscator
