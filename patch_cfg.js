@@ -1,38 +1,55 @@
 const fs = require('fs');
-let html = fs.readFileSync('web/index.html', 'utf8');
+let html = fs.readFileSync('web/index.html', 'utf-8');
 
-const warningCode = `                const parsedData = vis.network.convertDot(unescapedDot);
+const oldExtract = `        function extractDotForFunction(dotStr, functionId) {
+            if (functionId === "-1" || functionId === -1) return dotStr;
+            const prefix = \`F\${functionId}_BB\`;
+            const lines = dotStr.split('\\n');
+            let out = ['digraph CFG {', '  node [shape=box];'];
+            for (let line of lines) {
+                line = line.trim();
+                if (line.startsWith(prefix)) out.push('  ' + line);
+            }
+            out.push('}');
+            return out.join('\\n');
+        }`;
 
-                let warnElement = null;
-                if (parsedData.nodes.length > 500) {
-                    warnElement = document.createElement('div');
-                    warnElement.style.position = 'absolute';
-                    warnElement.style.top = '10px';
-                    warnElement.style.left = '50%';
-                    warnElement.style.transform = 'translateX(-50%)';
-                    warnElement.style.background = '#fff3cd';
-                    warnElement.style.color = '#856404';
-                    warnElement.style.padding = '10px 20px';
-                    warnElement.style.borderRadius = '4px';
-                    warnElement.style.border = '1px solid #ffeeba';
-                    warnElement.style.zIndex = '1000';
-                    warnElement.style.boxShadow = '0 2px 4px rgba(0,0,0,0.2)';
-                    warnElement.innerHTML = \`<strong>警告：</strong> 当前控制流图节点数 (\${parsedData.nodes.length}) 超过 500，渲染可能会很慢或导致浏览器卡顿。建议在上方选择单个函数查看 CFG。\`;
-                    // Note: We'll append it to container after the network is created or wrap the container
-                }`;
+const newExtract = `        function extractDotForFunction(dotStr, functionId) {
+            if (functionId === "-1" || functionId === -1 || functionId === "All") return dotStr;
+            const prefix = \`F\${functionId}_BB\`;
+            const lines = dotStr.split('\\n');
+            let out = ['digraph CFG {', '  node [shape=box];'];
+            let inTargetSubgraph = false;
 
-html = html.replace('                const parsedData = vis.network.convertDot(unescapedDot);', warningCode);
+            for (let line of lines) {
+                let trimmed = line.trim();
+                if (trimmed.startsWith(\`subgraph cluster_\${functionId} {\`)) {
+                    inTargetSubgraph = true;
+                    out.push(line);
+                    continue;
+                }
+                if (inTargetSubgraph && trimmed === '}') {
+                    inTargetSubgraph = false;
+                    out.push(line);
+                    continue;
+                }
+                if (inTargetSubgraph) {
+                    out.push(line);
+                    continue;
+                }
+                // Match edges
+                if (trimmed.startsWith(prefix) && trimmed.includes('->')) {
+                    out.push('  ' + trimmed);
+                }
+            }
+            out.push('}');
+            return out.join('\\n');
+        }`;
 
-const appendWarningCode = `                const network = new vis.Network(container, data, options);
-                window.cfgNetwork = network;
-                window.cfgData = data;
-
-                if (warnElement) {
-                    container.style.position = 'relative';
-                    container.appendChild(warnElement);
-                }`;
-
-html = html.replace('                const network = new vis.Network(container, data, options);\n                window.cfgNetwork = network;\n                window.cfgData = data;', appendWarningCode);
-
-fs.writeFileSync('web/index.html', html);
-console.log('patched cfg warning');
+if (html.includes(oldExtract)) {
+    html = html.replace(oldExtract, newExtract);
+    fs.writeFileSync('web/index.html', html);
+    console.log('Patched CFG extraction successfully');
+} else {
+    console.log('Could not find the target code to patch');
+}
