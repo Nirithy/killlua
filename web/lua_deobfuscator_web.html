@@ -7525,7 +7525,7 @@ run();
                 document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
 
                 if (result.success) {
-                    renderCollapsibleDisasm(result.disassembly, \'optimizedDisasm\');
+                    renderCollapsibleDisasm(result.disassembly, 'optimizedDisasm');
                     document.getElementById('cfgDotOutput').innerText = result.dot;
                     try {
                         const structObj = JSON.parse(result.structure);
@@ -7592,7 +7592,7 @@ run();
                     const processedBytecode = applyPlugins(currentBytecode);
                     const result = LuaDeob.deobfuscate(processedBytecode, -1, false, false, false, false, false, false, false);
                     if (result.success) {
-                        renderCollapsibleDisasm(result.disassembly, \'originalDisasm\');
+                        renderCollapsibleDisasm(result.disassembly, 'originalDisasm');
                         updateDeobfuscation();
                     } else {
                         document.getElementById('originalDisasm').innerText = '解析失败: ' + result.error;

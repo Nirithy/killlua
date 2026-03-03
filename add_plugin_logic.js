@@ -99,10 +99,10 @@ html = html.replace(
 
 // update updateDeobfuscation to call applyPlugins before deobfuscate
 html = html.replace(
-    /const result = LuaDeob\.deobfuscate\(currentBytecode, fold, dbe, sbm, dce, deflatten, rse, norm\);/g,
+    /const result = LuaDeob\.deobfuscate\(currentBytecode, -1, fold, dbe, sbm, dce, deflatten, rse, norm\);/g,
     `
                 let processedBytecode = applyPlugins(currentBytecode);
-                const result = LuaDeob.deobfuscate(processedBytecode, fold, dbe, sbm, dce, deflatten, rse, norm);`
+                const result = LuaDeob.deobfuscate(processedBytecode, -1, fold, dbe, sbm, dce, deflatten, rse, norm);`
 );
 
 fs.writeFileSync('web/index.html', html);
