@@ -542,6 +542,14 @@
                         </div>
                     </div>
 
+                    <div class="control-group">
+                        <label>支持忽略指令与代码检查</label>
+                        <div class="checkbox-group">
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-ignoreInstCheck" title="支持忽略指令"> 支持忽略指令 (Ignore Inst)</label>
+                            <label class="checkbox-item"><input type="checkbox" id="analysis-codeCheck" title="支持代码检查"> 支持代码检查 (Code Check)</label>
+                        </div>
+                    </div>
+
                     <button id="analysisApplyBtn" class="btn-mini" style="padding: 10px; font-size: 1rem;">应用优化到此函数</button>
 
                     <div style="margin-top: 15px;">
@@ -1346,6 +1354,14 @@
                     stmt = `// tforcall ${parts[1]} ${parts[2]} ${parts[3]}`;
                 } else if (op === 'TFORLOOP' && parts.length >= 3) {
                     stmt = `// tforloop ${parts[1]}, goto ${parts[parts.length-1]}`;
+                } else if (op === 'SETLIST' && parts.length >= 4) {
+                    stmt = `// setlist ${parts[1]} ${parts[2]} ${parts[3]}`;
+                } else if (op === 'VARARG' && parts.length >= 3) {
+                    stmt = `${parts[1]}... = ...`;
+                } else if (op === 'EXTRAARG' && parts.length >= 2) {
+                    stmt = `// extraarg ${parts[1]}`;
+                } else {
+                    stmt = line; // fallback
                 }
 
                 pseudo += `${indent}  ${stmt}\n`;
@@ -1361,7 +1377,10 @@
             let out = ['digraph CFG {', '  node [shape=box];'];
             for (let line of lines) {
                 line = line.trim();
-                if (line.startsWith(prefix)) out.push('  ' + line);
+                // extract node definition or edge definition
+                if (line.startsWith(prefix) || (line.includes('->') && line.includes(prefix))) {
+                    out.push('  ' + line);
+                }
             }
             out.push('}');
             return out.join('\n');
@@ -1663,6 +1682,11 @@
                 addProcessItem(baseName + "_deob.luac", currentBytecode, 'luac');
                 addProcessItem(baseName + "_deob.lasm", result.disassembly, 'lasm');
                 
+                // ADDITION: Also dump dot source
+                addProcessItem(baseName + "_cfg.dot", result.dot, 'txt');
+                // ADDITION: Also dump structure json
+                addProcessItem(baseName + "_structure.json", result.structure, 'txt');
+
                 // Auto-hide sidebar on mobile after processing to view results
                 if (window.innerWidth <= 768) {
                     document.getElementById('sidebar').classList.remove('show');
