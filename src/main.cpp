@@ -140,6 +140,11 @@ std::string escape_json_string(const std::string& input) {
         else if (c == '\n') output += "\\n";
         else if (c == '\r') output += "\\r";
         else if (c == '\t') output += "\\t";
+        else if (static_cast<unsigned char>(c) < 0x20) {
+            char buf[7];
+            snprintf(buf, sizeof(buf), "\\u%04x", static_cast<unsigned char>(c));
+            output += buf;
+        }
         else output += c;
     }
     return output;
