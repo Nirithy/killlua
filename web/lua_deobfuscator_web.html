@@ -7146,6 +7146,8 @@ run();
 
         let LuaDeob = null;
         let currentBytecode = null;
+        let originalBytecode = null;
+        let singleFuncOpts = {};
         let currentFileName = "";
 
         let installedPlugins = [];
@@ -7295,7 +7297,7 @@ run();
             const analysisApplyBtn = document.getElementById('analysisApplyBtn');
             if (analysisApplyBtn) {
                 analysisApplyBtn.addEventListener('click', () => {
-                    if (!currentBytecode || !LuaDeob) return;
+                    if (!originalBytecode || !LuaDeob) return;
                     const funcId = parseInt(document.getElementById('analysisFunctionSelector').value);
                     if (isNaN(funcId)) return;
 
@@ -7307,38 +7309,8 @@ run();
                     const rse = document.getElementById('analysis-rseCheck').checked;
                     const norm = document.getElementById('analysis-normCheck').checked;
 
-                    document.getElementById('status').innerText = '正在对单函数进行处理...';
-                    document.getElementById('status').style.color = '#cccccc';
-
-                    try {
-                        const processedBytecode = applyPlugins(currentBytecode);
-                        const result = LuaDeob.deobfuscate(processedBytecode, funcId, fold, dbe, sbm, dce, deflatten, rse, norm);
-                        if (result.success) {
-                            window.lastDot = result.dot;
-                            pendingDot = result.dot;
-                            currentBytecode = result.bytecode; // update bytecode state
-
-                            // Re-render global ones too
-                            renderCollapsibleDisasm(result.disassembly, 'optimizedDisasm');
-                            document.getElementById('cfgDotOutput').innerText = result.dot;
-                            try {
-                                const structObj = JSON.parse(result.structure);
-                                renderStructureTree(structObj, document.getElementById('structure-container'));
-                            } catch(e) {}
-
-                            renderCFG(extractDotForFunction(result.dot, funcId), 'analysis-cfg-container');
-                            updateAnalysisPseudoCode(funcId);
-
-                            document.getElementById('status').innerText = '处理完成';
-                            document.getElementById('status').style.color = '#4caf50';
-                        } else {
-                            document.getElementById('status').innerText = '处理失败: ' + result.error;
-                            document.getElementById('status').style.color = '#f44336';
-                        }
-                    } catch (e) {
-                        document.getElementById('status').innerText = '处理失败: ' + e.message;
-                        document.getElementById('status').style.color = '#f44336';
-                    }
+                    singleFuncOpts[funcId] = { fold, dbe, sbm, dce, deflatten, rse, norm };
+                    scheduleUpdateDeobfuscation();
                 });
             }
         });
@@ -7510,7 +7482,9 @@ run();
                     addProcessItem("assembled_" + Date.now() + ".luac", result.bytecode, 'luac');
 
                     // Immediately load the newly assembled bytecode as the currentBytecode
-                    currentBytecode = result.bytecode;
+                    originalBytecode = result.bytecode;
+                    currentBytecode = originalBytecode;
+                    singleFuncOpts = {};
 
                     // Trigger the deobfuscation logic to refresh all views (Disassembly, CFG, Structure)
                     updateDeobfuscation();
@@ -7591,12 +7565,12 @@ run();
                 if (!trimmed) continue;
 
                 if (trimmed.startsWith(':goto_')) {
-                    pseudo += `\n${trimmed}\n`;
+                    pseudo += `\n${indent}${trimmed}\n`;
                     continue;
                 }
 
                 if (trimmed.startsWith('.local') || trimmed.startsWith('.upval')) {
-                    pseudo += `// ${trimmed}\n`;
+                    pseudo += `${indent}// ${trimmed}\n`;
                     continue;
                 }
 
@@ -7655,9 +7629,19 @@ run();
                     stmt = `return ${parts.slice(1).join(' ')}`;
                 } else if (op === 'CLOSURE' && parts.length >= 3) {
                     stmt = `${parts[1]} = function(${parts[2]})`;
+                } else if (op === 'FORPREP' && parts.length >= 3) {
+                    stmt = `// for loop prep, goto ${parts[parts.length-1]}\n${indent}for ${parts[1]} in ... do`;
+                    indent += "  ";
+                } else if (op === 'FORLOOP' && parts.length >= 3) {
+                    indent = indent.slice(0, -2);
+                    stmt = `end // forloop ${parts[1]}, goto ${parts[parts.length-1]}`;
+                } else if (op === 'TFORCALL' && parts.length >= 4) {
+                    stmt = `// tforcall ${parts[1]} ${parts[2]} ${parts[3]}`;
+                } else if (op === 'TFORLOOP' && parts.length >= 3) {
+                    stmt = `// tforloop ${parts[1]}, goto ${parts[parts.length-1]}`;
                 }
 
-                pseudo += `  ${stmt}\n`;
+                pseudo += `${indent}  ${stmt}\n`;
             }
 
             container.innerText = pseudo || "No instructions found.";
@@ -7824,7 +7808,7 @@ run();
 
         let pendingDot = null;
         async function updateDeobfuscation() {
-            if (!currentBytecode || !LuaDeob) return;
+            if (!originalBytecode || !LuaDeob) return;
 
             try {
                 // Save current scroll position to restore it after update
@@ -7844,9 +7828,26 @@ run();
                 const rse = document.getElementById('rseCheck').checked;
                 const norm = document.getElementById('normCheck').checked;
 
+                let processedBytecode = applyPlugins(originalBytecode);
 
-                const processedBytecode = applyPlugins(currentBytecode);
-                const result = LuaDeob.deobfuscate(processedBytecode, -1, fold, dbe, sbm, dce, deflatten, rse, norm);
+                // 1. Apply global passes
+                let result = LuaDeob.deobfuscate(processedBytecode, -1, fold, dbe, sbm, dce, deflatten, rse, norm);
+                if (!result.success) throw new Error(result.error);
+                processedBytecode = result.bytecode;
+
+                // 2. Apply single function passes
+                for (const [idStr, opts] of Object.entries(singleFuncOpts)) {
+                    const id = parseInt(idStr);
+                    const singleRes = LuaDeob.deobfuscate(processedBytecode, id, opts.fold, opts.dbe, opts.sbm, opts.dce, opts.deflatten, opts.rse, opts.norm);
+                    if (!singleRes.success) throw new Error(singleRes.error);
+                    processedBytecode = singleRes.bytecode;
+                }
+
+                // 3. One final global disasm extraction (no extra optimization passes)
+                result = LuaDeob.deobfuscate(processedBytecode, -1, false, false, false, false, false, false, false);
+                if (!result.success) throw new Error(result.error);
+
+                currentBytecode = processedBytecode;
 
                 const endTime = performance.now();
                 document.getElementById('info-time').innerText = (endTime - startTime).toFixed(2) + ' ms';
@@ -7868,6 +7869,13 @@ run();
                         const selectedFunc = document.getElementById('cfgFunctionSelector').value;
                         renderCFG(extractDotForFunction(pendingDot, selectedFunc));
                         pendingDot = null;
+                    }
+                    if (document.querySelector('.tab[data-tab="analysis"]').classList.contains('active')) {
+                        const selectedFunc = document.getElementById('analysisFunctionSelector').value;
+                        if (selectedFunc) {
+                            renderCFG(extractDotForFunction(window.lastDot, selectedFunc), 'analysis-cfg-container');
+                            updateAnalysisPseudoCode(selectedFunc);
+                        }
                     }
 
                     // Restore scroll position
@@ -7910,7 +7918,9 @@ run();
             }
 
             reader.onload = async (re) => {
-                currentBytecode = new Uint8Array(re.target.result);
+                originalBytecode = new Uint8Array(re.target.result);
+                currentBytecode = originalBytecode;
+                singleFuncOpts = {};
                 const magic = Array.from(currentBytecode.slice(0, 4)).map(b => b.toString(16).padStart(2, '0')).join(' ');
                 document.getElementById('info-magic').innerText = '0x' + magic.toUpperCase();
 
@@ -7937,20 +7947,13 @@ run();
                 return;
             }
 
-            const fold = document.getElementById('foldCheck').checked;
-            const dbe = document.getElementById('dbeCheck').checked;
-            const sbm = document.getElementById('sbmCheck').checked;
-            const dce = document.getElementById('dceCheck').checked;
-            const deflatten = document.getElementById('deflattenCheck').checked;
-            const rse = document.getElementById('rseCheck').checked;
-            const norm = document.getElementById('normCheck').checked;
+            // `currentBytecode` already reflects all global and single-function optimizations!
+            // We just need to extract the final disassembly to bundle with the luac.
+            const result = LuaDeob.deobfuscate(currentBytecode, -1, false, false, false, false, false, false, false);
 
-
-                const processedBytecode = applyPlugins(currentBytecode);
-                const result = LuaDeob.deobfuscate(processedBytecode, -1, fold, dbe, sbm, dce, deflatten, rse, norm);
             if (result.success) {
                 const baseName = currentFileName.replace(/\.[^/.]+$/, "");
-                addProcessItem(baseName + "_deob.luac", result.bytecode, 'luac');
+                addProcessItem(baseName + "_deob.luac", currentBytecode, 'luac');
                 addProcessItem(baseName + "_deob.lasm", result.disassembly, 'lasm');
 
                 // Auto-hide sidebar on mobile after processing to view results
@@ -7958,7 +7961,7 @@ run();
                     document.getElementById('sidebar').classList.remove('show');
                 }
             } else {
-                alert('处理失败: ' + result.error);
+                alert('导出失败: ' + result.error);
             }
         };
 
